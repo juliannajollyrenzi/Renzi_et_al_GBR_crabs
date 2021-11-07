@@ -165,12 +165,12 @@ avgTL %>%
            xmin = as.Date("2020-02-03", "%Y-%m-%d"), 
            xmax = as.Date("2020-02-08", "%Y-%m-%d"), 
            ymin = -Inf, 
-           ymax = Inf, fill = yell, alpha = 0.2) +
+           ymax = Inf, fill = lightO, alpha = 0.2) +
   annotate("rect",
            xmin = as.Date("2020-02-15 00:00:00", "%Y-%m-%d"), 
            xmax = as.Date("2020-02-22 00:00:00", "%Y-%m-%d"), 
            ymin = -Inf, 
-           ymax = Inf, fill = yell, alpha = 0.2) -> tissueLFig
+           ymax = Inf, fill = lightO, alpha = 0.2) -> tissueLFig
 ```
 
 # Combine figures 
