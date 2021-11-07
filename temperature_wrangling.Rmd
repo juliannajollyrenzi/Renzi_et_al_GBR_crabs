@@ -12,10 +12,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 # load packages
-require(tidyverse)
-require(here)
-require(lubridate)
-require(RColorBrewer)
+require(tidyverse) # data manipulation
+require(here) # relative file paths
+require(lubridate) # dates and times
 ```
 
 # Bring in the temperature data from HOBO loggers and the associated metadata
@@ -162,26 +161,16 @@ all_temp %>%
 
 ```
 
-Save as a CSV--remove the pound signs if you want to re-create the CSV
+Save as a CSV--remove the pound signs if you want to re-create the CSV. This first CSV is of the mean maximum temperatures
 
 ```{r}
 # write_csv(x = temp_metrics, file = here("generated_data/temperature_metrics.csv"))
 ```
 
-
-# Visualize the data
-
-First look at how the temperature changes over time
+This second CSV is of the full temperature time series, but averaged across hobo loggers (1 value per date-time, NOT the mean daily value)
 
 ```{r}
-temp_time_avgs %>% 
-  filter(Date_time > as_datetime("2020-02-01 00:00:00")) %>% 
-  ggplot(aes(x = Date_time, y = Mean_temp)) +
-  geom_line() +
-  geom_line(aes(x = as_datetime(Day), y = Mean_max_C_4), data = subset(all_temp, Day > as_datetime("2020-01-31")), color = "red") +
-  geom_hline(yintercept = 27.3, color = "blue", linetype = "dashed") + # this is the Heron monthly mean water temp according to: https://seatemperature.info/heron-island-water-temperature.html and also Jesse + Gus
-  theme_classic()
+# write_csv(x = temp_time_avgs, file = here("generated_data/hobo_timeseries.csv"))
 ```
-
 
 

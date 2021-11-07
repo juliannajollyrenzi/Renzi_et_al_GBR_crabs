@@ -1,0 +1,71 @@
+---
+title: "Tissue loss vs. temperature plot"
+author: "Julianna Renzi"
+date: "11/7/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse) # data manipulation
+require(here) # relative file paths
+require(lubridate) # dates and times
+require(wesanderson) # color palette
+```
+
+# Bring in the data
+
+```{r}
+# this is the temperature time series from the experiment, with one value per date/time (averaged across HOBO loggers, with a value per few minutes)
+temp_timeseries <- read_csv(here("generated_data/hobo_timeseries.csv"))
+
+# this is the 
+```
+
+Create our color palette from the Wes Anderson package
+
+```{r}
+darkB <- wes_palette("Zissou1", n = 5)[1]
+lightB <- wes_palette("Zissou1", n = 5)[2]
+yell <- wes_palette("Zissou1", n = 5)[3]
+yellBr <- wes_palette("Zissou1", n = 5)[4]
+vibRed <- wes_palette("Zissou1", n = 5)[5]
+
+```
+
+
+# Plot temperature through time
+
+Look at how the temperature changes over time
+
+```{r}
+temp_time_avgs %>% 
+  filter(Date_time > as_datetime("2020-02-01 00:00:00")) %>% # just from the start of the experiment
+  ggplot(aes(x = Date_time, y = Mean_temp)) +
+  geom_line() +
+  geom_line(aes(x = as_datetime(Day), y = Mean_max_C_4), data = subset(all_temp, Day > as_datetime("2020-01-31")), 
+            color = vibRed) +
+  geom_hline(yintercept = 27.3, 
+             color = darkB, 
+             linetype = "dashed") + # this is the Heron monthly mean water temp according to: https://seatemperature.info/heron-island-water-temperature.html and also Jesse + Gus
+  theme_classic() +
+  # make first rectangle highlighting the first peak 
+  annotate("rect",
+           xmin = as_datetime("2020-02-02 00:00:00"), 
+           xmax = as_datetime("2020-02-08 00:00:00"), 
+           ymin = -Inf, 
+           ymax = Inf, fill = yell, alpha = 0.2) +
+  annotate("rect",
+           xmin = as_datetime("2020-02-15 00:00:00"), 
+           xmax = as_datetime("2020-02-22 00:00:00"), 
+           ymin = -Inf, 
+           ymax = Inf, fill = yell, alpha = 0.2) +
+  ylab("Water temperature (°C)") +
+  xlab("Date") 
+  
+
+```
+
+
+
