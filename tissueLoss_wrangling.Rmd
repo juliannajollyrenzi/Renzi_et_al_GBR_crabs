@@ -1,0 +1,55 @@
+---
+title: "Tissue loss wrangling"
+author: "Julianna Renzi"
+date: "11/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse) # data wrangling
+require(here) # relative file paths
+```
+
+This is a separate code to go from cumulative percent cover to percent tissue loss in a given day. It creates a csv file that we use for the temperature analysis.
+
+First, we bring in the data:
+
+```{r}
+# this is the percent tissue loss on a nubbin on a given day (cumulative, taken from photos)
+nubbinDat <- read_csv(here("data/Nubbin_percent_cover.csv"))
+  nubbinDat$Date <- as.Date(nubbinDat$Date, format='%m/%d/%y') # get dates in datetime format
+  
+  
+# this is the metadata for the experiment
+metadat <- read.csv(here("data/Coral_metadata.csv")) 
+  
+```
+
+Then get daily tissue loss
+
+```{r}
+# summarize for each date (average both coral sides)
+nubbinDat %>% 
+  group_by(Coral_ID, Date) %>% # average for both sides (front & back)
+  summarize(Percent_white_both_sides = mean(Percent_dead)) %>% 
+  full_join(metadat, key = Coral_ID) %>% # add in metadata
+  drop_na(Coral_ID) -> treatPercChange
+
+# get daily change for each coral
+treatPercChange %>% 
+  # first get the change in percent cover since the last day
+  mutate(Perc_tissue_loss = (Percent_white_both_sides - lag(Percent_white_both_sides))) %>% 
+  # Negatives are zero (i.e. going to a new coral record)
+  mutate(Perc_tissue_loss = replace(Perc_tissue_loss, which(Perc_tissue_loss < 0), 0)) %>% 
+  mutate(Perc_tissue_loss = replace_na(Perc_tissue_loss, 0)) -> tissueLoss
+```
+
+Then save as a csv. To actually write to a csv, remove the pound signs from the code below.
+
+```{r}
+# write_csv(x = tissueLoss, file = here("generated_data/tissue_loss.csv"))
+```
+
+
