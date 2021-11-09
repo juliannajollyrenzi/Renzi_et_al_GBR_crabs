@@ -1,0 +1,106 @@
+---
+title: "Survival analysis"
+author: "Julianna Renzi"
+date: "11/9/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse) # data manipulation
+require(here) # relative file paths
+require(lubridate) # dates and times
+require(wesanderson) # color palette
+require(patchwork) # combining figures
+```
+
+# Bring in the data
+
+```{r}
+# CSV with the day each coral "died"/was pulled from the experiment
+# corals had a censored value of "0" if they either (1) made it to the end of the experiment without "dying" or (2) were dropped/broke (corals 7 and 29)
+deathDat <- read_csv(here("data/Coral_survival.csv"))
+
+```
+# Prepare the data
+
+```{r}
+# calculate number of days to death (this is easy because the experiment started at the beginning of the month)
+deathDat %>% 
+  mutate(Death_day = as.character(Death_day)) %>% 
+  rowwise %>% 
+  mutate(Delta_time = str_split(Death_day, "/")[[1]][2]) %>% 
+  mutate(Delta_time = as.numeric(Delta_time)) -> surv_df
+```
+
+
+Create our color palette from the Wes Anderson package
+
+```{r}
+vibRed <- wes_palette("Darjeeling1", n = 5)[1]
+forGreen <- wes_palette("Darjeeling1", n = 5)[2]
+lightO <- wes_palette("Darjeeling1", n = 5)[3]
+darkO <- wes_palette("Darjeeling1", n = 5)[4]
+skyB <- wes_palette("Darjeeling1", n = 5)[5]
+
+```
+
+# Plot the survival among treatments
+
+```{r}
+# order the treatments
+surv_df$Treatment <- factor(surv_df$Treatment,levels = c("NAN", "NAW",  
+                                                         "NNW", "NNN", "CAN",
+                                                         "CAW", "CNN", "CNW"))
+
+# broken up by no wounding:
+surv_df %>% 
+  filter(Coral_ID != 7, Coral_ID != 29) %>% # get rid of the ones that were dropped 
+  filter(Treatment == "NAN" | Treatment == "NNN" | Treatment == "CAN" | Treatment == "CNN") %>% 
+  ggplot(aes(x = Treatment, y = Delta_time, fill = Algae_treatment, color = Crab_treatment)) +
+  geom_boxplot(size = 1) +
+  scale_fill_manual(values = alpha(c(skyB, darkO), 0.6)) +
+  scale_color_manual(values = c(forGreen, lightO)) +
+  ylab("Number of days to death") +
+  ggtitle("No wounding") +
+  scale_y_continuous(breaks = c(0, 5, 10, 15, 20, 25)) +
+  theme_classic() +
+  theme(text = element_text(size = 20), legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) -> boxp.nowound
+
+
+# and wounding:
+surv_df %>% 
+  filter(Coral_ID != 7, Coral_ID != 29) %>% # get rid of the dropped ones
+  filter(Treatment == "NAW" | Treatment == "NNW" | Treatment == "CAW" | Treatment == "CNW") %>% 
+  ggplot(aes(x = Treatment, y = Delta_time, fill = Algae_treatment, color = Crab_treatment)) +
+  geom_boxplot(size = 1) +
+  scale_fill_manual(values = alpha(c(skyB, darkO), 0.6)) +
+  scale_color_manual(values = c(forGreen, lightO)) +
+  ylab("Number of days to death") +
+  scale_y_continuous(breaks = c(0, 5, 10, 15, 20, 25)) +
+  ggtitle("Wounding") +
+  scale_x_discrete(labels=c("Algae","Control","Crab + Algae","Crab")) +
+  theme_classic() +
+  theme(text = element_text(size = 20), legend.position = "none") -> boxp.wound
+
+```
+
+Plot them together
+
+```{r}
+# pdf(here("figures/surivalBoxplts.pdf"), height = 9, width = 7.5)
+
+boxp.nowound / boxp.wound
+
+# dev.off()
+```
+
+
+
+
