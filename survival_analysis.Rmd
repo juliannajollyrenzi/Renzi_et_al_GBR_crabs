@@ -15,6 +15,8 @@ require(here) # relative file paths
 require(lubridate) # dates and times
 require(wesanderson) # color palette
 require(patchwork) # combining figures
+require(survival) # surviavl analysis
+require(survminer) # plotting survival curves
 ```
 
 # Bring in the data
@@ -99,7 +101,156 @@ boxp.nowound / boxp.wound
 # dev.off()
 ```
 
-# Start survival analysis
+# Do survival analysis
+
+First create a survival object using the Kaplan-Meier method. The Kaplan-Meier estimator is a non-parametric (survival data are skewed) statistic that allows us to estimate the survival function. At t = 0 the Kaplan-Meier estimate is 1 and with t -> inf the estimator approaches 0 (no survival). It assumes that the probability of surviving past a certain time point t is equal to the product of the observed survival rates until time point t and that proportions are conditional on the previous proportions (only take into account those that survived previous t). For this we want to order survival times in order of increasing duration first, then calculate S(t) (the survival probability at time t) by multiplying surviving proportions in each step. 
+
+```{r}
+surv_object <- Surv(time = surv_df$Delta_time, event = surv_df$Censored)
+  surv_object # plus indicates a censored data point
+  
+```
+
+Create a full cox proportional hazards regression model. Note that a hazard ratio (HR) > 1 is an increased risk of death and HR < 1 is a decreased risk.
+
+```{r}
+full.coxph <- coxph(surv_object ~ Crab_treatment * Algae_treatment * Wounding_treatment, 
+                    data = surv_df)
+```
+
+## Model selection
+
+Now we want to winnow down the terms
+
+```{r}
+coxph.1 <- coxph(surv_object ~ Crab_treatment + Algae_treatment + Wounding_treatment +
+                   Crab_treatment:Algae_treatment +
+                   Crab_treatment:Wounding_treatment +
+                   Algae_treatment:Wounding_treatment,
+                 data = surv_df)
+
+anova(full.coxph, coxph.1, test = 'Chisq') # no difference
+```
+
+```{r}
+# drop the least significant highest order term
+coxph.2 <- coxph(surv_object ~ Crab_treatment + Algae_treatment + Wounding_treatment +
+                   Crab_treatment:Wounding_treatment +
+                   Algae_treatment:Wounding_treatment,
+                 data = surv_df)
+
+anova(coxph.1, coxph.2, test = 'Chisq') # looks okay--continue reducing
+```
+
+```{r}
+# drop the least significant highest order term
+coxph.3 <- coxph(surv_object ~ Crab_treatment + Algae_treatment + Wounding_treatment +
+                   Crab_treatment:Wounding_treatment,
+                 data = surv_df)
+
+anova(coxph.2, coxph.3, test = 'Chisq') # looks okay--continue reducing
+```
+
+```{r}
+# drop the highest order term
+coxph.4 <- coxph(surv_object ~ Crab_treatment + Algae_treatment + Wounding_treatment,
+                 data = surv_df)
+
+anova(coxph.3, coxph.4, test = 'Chisq') # looks like we took it one step too far
+```
+
+```{r}
+# check to make sure this simpler model isn't better
+coxph.5 <- coxph(surv_object ~ Crab_treatment + Algae_treatment,
+                 data = surv_df)
+
+
+AIC(full.coxph, coxph.1, coxph.2, coxph.3, coxph.4, coxph.5) # Nope, looks like the best model is Model 3
+
+
+# set it as our model
+mCox <- coxph.3
+
+```
+
+## Plot hazards model
+
+```{r}
+# first for JUST crabs:
+crab_df <- with(surv_df,
+               data.frame(Crab_treatment = c("Y", "N"), 
+                          Algae_treatment = c("N", "N"),
+                          Wounding_treatment = c("N", "N")))
+  
+c.fit <- survfit(mCox, newdata = crab_df, data = surv_df)
+
+# for JUST algae:
+alg_df <- with(surv_df,
+                data.frame(Crab_treatment = c("N", "N"), 
+                           Algae_treatment = c("Y", "N"),
+                           Wounding_treatment = c("N", "N")))
+
+a.fit <- survfit(mCox, newdata = alg_df, data = surv_df)
+
+# for wounding:
+w_df <- with(surv_df,
+               data.frame(Crab_treatment = c("N", "N"), 
+                          Algae_treatment = c("N", "N"),
+                          Wounding_treatment = c("Y", "N")))
+
+w.fit <- survfit(mCox, newdata = w_df, data = surv_df)
+
+# then the crab interaction
+CW_df <- with(surv_df,
+                data.frame(Crab_treatment = c("Y", "Y", "N", "N"), 
+                           Algae_treatment = c("N", "N", "N", "N"),
+                           Wounding_treatment = c("Y", "N", "Y", "N")))
+
+cw.fit <- survfit(mCox, newdata = CW_df, data = surv_df)
+
+
+
+# plot them all
+ggsurvplot(c.fit, conf.int = TRUE, legend.labs=c("Crab = Y", "Crab = N"),
+           ggtheme = theme_classic())
+ggsurvplot(cw.fit, conf.int = TRUE, legend.labs=c("Crab + Wounding", "Crab", "Wounding", "Control"),
+           ggtheme = theme_classic())
+
+arrange_ggsurvplots(list(
+  ggsurvplot(c.fit, conf.int = TRUE, legend.labs=c("Yes", "Control"),
+             ggtheme = theme_classic(), palette = c(skyB, lightO), 
+             legend.title = "Crab", conf.int.alpha = 0.1, xlab="Time in days"),
+  ggsurvplot(a.fit, legend.labs=c("Yes", "Control"),
+             ggtheme = theme_classic(), palette = c(forGreen , lightO), 
+             legend.title = "Algae", conf.int = TRUE, conf.int.alpha=0.1, 
+             xlab="Time in days"),
+  ggsurvplot(w.fit, data = surv_df, legend.labs=c("Yes", "Control"),
+             ggtheme = theme_classic(), palette = c(darkO, lightO), 
+             legend.title = "Wounding", conf.int = TRUE, conf.int.alpha=0.1, 
+             xlab="Time in days"),
+  ggsurvplot(cw.fit, legend.labs=c("Crab + Wounding", "Crab", "Wounding", "Control"),
+             ggtheme = theme_classic(), 
+             palette = c(vibRed, skyB, darkO, lightO), 
+             legend.title = "Treatment", conf.int = TRUE, conf.int.alpha=0.1, 
+             xlab="Time in days")),
+  ncol = 2, nrow = 2) -> plts_coxph
+
+# ggsave(here("figures/survivalCurves.pdf"), plts_coxph, width = 10, height = 8)
+
+```
+
+## Test model assumptions
+
+
+
+
+
+
+
+
+
+
+
 
 
 
