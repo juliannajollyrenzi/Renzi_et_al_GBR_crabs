@@ -135,7 +135,7 @@ avgTL %>%
   facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
   ylab("Average tissue loss (%)") +
   xlab("Date") +
-  scale_color_manual(values = c(skyB, darkO),
+  scale_color_manual(values = c(darkO, forGreen),
                      name = "Algae") + # clean up legend and colors
   theme_classic() +
   # add rectangles showing extreme heat periods
@@ -219,7 +219,7 @@ pred %>%
   facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
   ylab("Predicted daily tissue loss (%)") +
   xlab("Mean maximum temperature-4 day (°C)") +
-  scale_color_manual(values = c(darkO, skyB),
+  scale_color_manual(values = c(forGreen, darkO),
                      name = "Algae") + # clean up legend and colors
   theme_classic() +
   theme(legend.position = "none") -> modelfig

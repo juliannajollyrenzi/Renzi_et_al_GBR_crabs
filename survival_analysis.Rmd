@@ -60,17 +60,16 @@ surv_df$Treatment <- factor(surv_df$Treatment,levels = c("NAN", "NAW",
 surv_df %>% 
   filter(Coral_ID != 7, Coral_ID != 29) %>% # get rid of the ones that were dropped 
   filter(Treatment == "NAN" | Treatment == "NNN" | Treatment == "CAN" | Treatment == "CNN") %>% 
-  ggplot(aes(x = Treatment, y = Delta_time, fill = Algae_treatment, color = Crab_treatment)) +
+  ggplot(aes(x = Treatment, y = Delta_time, fill = Algae_treatment)) +
   geom_boxplot(size = 1) +
-  scale_fill_manual(values = alpha(c(skyB, darkO), 0.6)) +
-  scale_color_manual(values = c(forGreen, lightO)) +
+  scale_fill_manual(values = alpha(c(darkO, forGreen), 0.7)) +
   ylab("Number of days to death") +
   ggtitle("No wounding") +
   scale_y_continuous(breaks = c(0, 5, 10, 15, 20, 25)) +
   theme_classic() +
   theme(text = element_text(size = 20), legend.position = "none",
         axis.title.x=element_blank(),
-        axis.text.x=element_blank(),
+        axis.text.x=element_blank(), 
         axis.ticks.x=element_blank()) -> boxp.nowound
 
 
@@ -78,10 +77,9 @@ surv_df %>%
 surv_df %>% 
   filter(Coral_ID != 7, Coral_ID != 29) %>% # get rid of the dropped ones
   filter(Treatment == "NAW" | Treatment == "NNW" | Treatment == "CAW" | Treatment == "CNW") %>% 
-  ggplot(aes(x = Treatment, y = Delta_time, fill = Algae_treatment, color = Crab_treatment)) +
+  ggplot(aes(x = Treatment, y = Delta_time, fill = Algae_treatment)) +
   geom_boxplot(size = 1) +
-  scale_fill_manual(values = alpha(c(skyB, darkO), 0.6)) +
-  scale_color_manual(values = c(forGreen, lightO)) +
+  scale_fill_manual(values = alpha(c(darkO, forGreen), 0.7)) +
   ylab("Number of days to death") +
   scale_y_continuous(breaks = c(0, 5, 10, 15, 20, 25)) +
   ggtitle("Wounding") +
@@ -100,6 +98,9 @@ boxp.nowound / boxp.wound
 
 # dev.off()
 ```
+
+# Start survival analysis
+
 
 
 
