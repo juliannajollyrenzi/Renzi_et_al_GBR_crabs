@@ -1,12 +1,203 @@
 ---
-title: "Temperature analysis"
+title: "Analyzing the effect of temperature on coral tissue loss"
 author: "Julianna Renzi"
 date: "11/7/2021"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse) # data wrangling
+require(here) # relative file paths
+require(wesanderson) # color palette
+require(boot) # diagnostic plots
 ```
 
-# Analyzing the effect of temperature on coral tissue loss
+# Bring in the data
+
+```{r}
+# this is the daily previous mean maximum water temperatures with a 4-day window
+avgMax4 <- read_csv(here("generated_data/temperature_metrics.csv"))
+
+# this is the percent tissue loss on a nubbin on a given day (created in the tissue wrangling file)
+tissueLoss <- read_csv(here("generated_data/tissue_loss.csv"))
+
+```
+
+Before doing any analyses, we want to remove observations from February 4th because that represents tissue loss since the first (multiple days), which is not comparable to the rest. We also want to attach temperature observations to our tissue loss data
+
+```{r}
+# remove the 4th
+tissueLoss %>% 
+  filter(Date != as.Date("2020-02-04")) %>% 
+  left_join(avgMax4, key = Date) -> tissueLoss4
+
+```
+
+
+# Make a Hurdle model
+
+## Binomial model for zeros
+
+Start with a model for the zero observations (binomial family with a logit link)
+
+```{r}
+# make a column that says whether the tissue loss for the day is 0 or greater than 0
+# a 1 means there was tissue loss and a 0 means there was no tissue loss
+tissueLoss4$TissueBin <- ifelse(tissueLoss4$Perc_tissue_loss > 0.0, 1, 0)
+
+# then make a full model (all terms and their interactions) for the zero observations
+mBin <- glm(TissueBin ~ Crab_treatment*Algae_treatment*Wounding_treatment*Mean_max_C_4, 
+          data = tissueLoss4, 
+          family = binomial(link = logit))
+
+```
+
+Use a stepwise selection process to pick the most parsimonious model
+
+```{r}
+mBin.step <- step(mBin, direction = "both")
+  summary(mBin.step)
+
+```
+
+
+```{r}
+bin.diag <- glm.diag(mBin.step)
+  glm.diag.plots(mBin.step, bin.diag) # looks more or less okay to me
+```
+
+
+
+## Gamma model for non-zeros
+
+Then create a Gamma family generalized linear model with a log link for non-zero tissue loss values
+
+```{r}
+mGam <- glm(Perc_tissue_loss ~ Crab_treatment*Algae_treatment*Wounding_treatment*Mean_max_C_4, 
+          data = subset(tissueLoss4, TissueBin == 1), # only use a subset of values (ones where there is tissue loss))
+          family = Gamma(link = "log"))  
+
+```
+
+Use a stepwise selection process again
+
+```{r}
+mGamm.step <- step(mGam, direction = "both")
+  # check out the model
+  summary(mGamm.step)
+  
+```
+
+Check model fit
+
+```{r}
+gamm.diag <- glm.diag(mGamm.step)
+  glm.diag.plots(mGamm.step, gamm.diag) # looks okay--looks like there's one pretty big outlier: Coral 78
+```
+
+
+# Predict model values
+
+```{r}
+# make a dataframe to store predictions in
+pred <- expand.grid(Mean_max_C_4 = seq(min(tissueLoss4$Mean_max_C_4), max(tissueLoss4$Mean_max_C_4), by = 0.05), 
+                    Crab_treatment = c("Y", "N"), 
+                    Algae_treatment = c("Y", "N"), 
+                    Wounding_treatment = c("Y", "N"))
+
+# predict probability of ANY tissue loss
+pred$PredProb <- predict(mBin.step, pred, type = "response") # response gives the predicted probabilities 
+
+# predict percent amount of tissue loss
+pred$PredTissueLoss <- predict(mGamm.step, pred, type = "response") 
+
+```
+
+# Plot
+
+First, bring in our project color palette from the Wes Anderson package
+
+```{r}
+vibRed <- wes_palette("Darjeeling1", n = 5)[1]
+forGreen <- wes_palette("Darjeeling1", n = 5)[2]
+lightO <- wes_palette("Darjeeling1", n = 5)[3]
+darkO <- wes_palette("Darjeeling1", n = 5)[4]
+skyB <- wes_palette("Darjeeling1", n = 5)[5]
+
+```
+
+Then, plot the binomial model
+
+- Significant terms for temperature and crab-wounding
+
+```{r}
+# make labels nice
+crab.labs <- c("Crab", "No crab")
+names(crab.labs) <- c("Y", "N")
+
+pred %>% 
+  # use predicted data
+  ggplot(aes(x = Mean_max_C_4, y = PredProb, linetype = Wounding_treatment, color = Wounding_treatment)) +
+  stat_summary(fun = mean, geom = "line",
+              aes(linetype = Wounding_treatment)) +
+  scale_linetype_manual(values=c("solid", "dashed"),
+                        name = "Wounding") +
+  # add in actual data
+  geom_point(data = tissueLoss4, 
+             aes(x = Mean_max_C_4, y = TissueBin, color = Wounding_treatment), 
+             alpha = 0.8) +
+  facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
+  ylab("Predicted probability of losing tissue") +
+  xlab("Average 4-day water MAX temperature (°C)") +
+  scale_color_manual(values = c(skyB, darkO),
+                     name = "Wounding") +
+  theme_classic()
+
+```
+
+Plot model for values greater than zero
+
+```{r}
+pred %>% 
+  # use predicted data again
+  ggplot(aes(x = Mean_max_C_4, y = PredTissueLoss, color = Algae_treatment, linetype = Wounding_treatment)) +
+  geom_line() +
+  scale_linetype_manual(values=c("solid", "dashed"),
+                        name = "Wounding") +
+  facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
+  ylab("Predicted daily tissue loss (%)") +
+  xlab("Average 4-day MAX water temperature (°C)") +
+  scale_color_manual(values = c(darkO, skyB),
+                     name = "Algae") + # clean up legend and colors
+  theme_classic()
+```
+
+Look at raw data for a sec 
+
+```{r}
+tissueLoss4 %>% 
+  filter(Perc_tissue_loss > 0 & Coral_ID != 78) %>% 
+  ggplot(aes(x = Algae_treatment, y = Perc_tissue_loss, color = Wounding_treatment)) +
+  geom_boxplot(aes(x = Algae_treatment, y = Perc_tissue_loss, color = Wounding_treatment)) +
+  facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) +
+  theme_classic() 
+
+
+```
+
+
+# try one other thing
+
+```{r}
+mGaus <- glm(Perc_tissue_loss ~ Crab_treatment*Algae_treatment*Wounding_treatment*Mean_max_C_4, 
+          data = tissueLoss4, # only use a subset of values (ones where there is tissue loss))
+          )  
+```
+
+
+THIS MAKES SENSE!!
+-Add random effect for tank?
