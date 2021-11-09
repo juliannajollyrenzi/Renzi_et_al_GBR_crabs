@@ -1,5 +1,5 @@
 ---
-title: "Tissue loss vs. temperature plot"
+title: "Tissue loss vs. temperature plots"
 author: "Julianna Renzi"
 date: "11/7/2021"
 output: html_document
@@ -151,14 +151,106 @@ avgTL %>%
            ymax = Inf, fill = lightO, alpha = 0.2) -> tissueLFig
 ```
 
+
+# Make a tissue loss model that includes temperature
+
+Before doing any analyses, we want to remove observations from February 4th because that represents tissue loss since the first (multiple days), which is not comparable to the rest. We also want to attach temperature observations to our tissue loss data
+
+```{r}
+# remove the 4th
+tissueLoss %>% 
+  filter(Date != as.Date("2020-02-04")) %>% 
+  left_join(avgMax4, key = Date) -> tissueLoss4
+
+```
+
+## Use a generalized linear model
+
+Start with the full model with all terms and their interactions
+
+```{r}
+mGaus <- glm(Perc_tissue_loss ~ Crab_treatment*Algae_treatment*Wounding_treatment*Mean_max_C_4,
+             data = tissueLoss4,
+             family = gaussian(link = "identity"))  
+
+```
+
+Then use a stepwise selection process to pick the most parsimonious model
+
+```{r}
+mGaus.step <- step(mGaus, direction = "both")
+  summary(mGaus.step) 
+  
+```
+
+## Predict model values
+
+```{r}
+# make a dataframe to store predictions in
+pred <- expand.grid(Mean_max_C_4 = seq(min(tissueLoss4$Mean_max_C_4), max(tissueLoss4$Mean_max_C_4), by = 0.05), 
+                    Crab_treatment = c("Y", "N"), 
+                    Algae_treatment = c("Y", "N"), 
+                    Wounding_treatment = c("Y", "N"))
+
+# predict percent amount of tissue loss
+pred$PredTissueLoss <- predict(mGaus.step, pred, type = "response") 
+
+```
+
+## Plot
+
+```{r}
+# make labels nice
+crab.labs <- c("Crab", "No crab")
+names(crab.labs) <- c("Y", "N")
+
+# make it match the panel above
+pred %>% 
+  mutate(Crab_treatment = factor(Crab_treatment, levels = c("N", "Y"))) -> pred
+
+
+# plot
+pred %>% 
+  # use predicted data 
+  ggplot(aes(x = Mean_max_C_4, y = PredTissueLoss, color = Algae_treatment, linetype = Wounding_treatment)) +
+  geom_line() +
+  scale_linetype_manual(values=c("dashed", "solid"),
+                        name = "Wounding") +
+  facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
+  ylab("Predicted daily tissue loss (%)") +
+  xlab("Mean maximum temperature-4 day (°C)") +
+  scale_color_manual(values = c(darkO, skyB),
+                     name = "Algae") + # clean up legend and colors
+  theme_classic() +
+  theme(legend.position = "none") -> modelfig
+
+
+```
+
+**Statistically significant terms**
+All terms *except*:
+- Wounding 
+- Wounding:temperature
+- Wounding:crab
+- Wounding:crab:temperature
+
+**Observations from the plot**
+See that: 
+- Temperature had the largest effect on tissue loss when there was no crab, algae, and no wounding
+- Temperature had very little effect on tissue loss when there was a crab present, although if there was algae this relationship steepened (looks about parallel with no algae/no crab)
+- Algae increased the amount of tissue lost
+- Wounding appears to decrease the strength of the relationship between temperature and crabs/algae/tissue loss
+ 
+
+
 # Combine figures 
 
 To save these figures as a PDF in the figures folder, remove the pound signs before the `pdf()` and `dev.off()`
 
 ```{r}
-# pdf(file = here("figures/tissueLTempseries.pdf"), width = 9.5, height = 6.5)
+# pdf(file = here("figures/tissueLTempseries.pdf"), width = 8.5, height = 10)
 
-(tempTSFig + maxTSFig) / (tissueLFig)
+(tempTSFig + maxTSFig) / (tissueLFig) / (modelfig)
 
 # dev.off()
 ```
