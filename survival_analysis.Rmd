@@ -101,13 +101,13 @@ boxp.nowound / boxp.wound
 # dev.off()
 ```
 
-# Do survival analysis
+# Survival analysis
 
-First create a survival object using the Kaplan-Meier method. The Kaplan-Meier estimator is a non-parametric (survival data are skewed) statistic that allows us to estimate the survival function. At t = 0 the Kaplan-Meier estimate is 1 and with t -> inf the estimator approaches 0 (no survival). It assumes that the probability of surviving past a certain time point t is equal to the product of the observed survival rates until time point t and that proportions are conditional on the previous proportions (only take into account those that survived previous t). For this we want to order survival times in order of increasing duration first, then calculate S(t) (the survival probability at time t) by multiplying surviving proportions in each step. 
+First create a survival object using the Kaplan-Meier method. The Kaplan-Meier estimator is a non-parametric (survival data are skewed) statistic that allows us to estimate the survival function. At t = 0 the Kaplan-Meier estimate is 1 and with t -> inf the estimator approaches 0 (no survival). It assumes that the probability of surviving past a certain time point t is equal to the product of the observed survival rates until time point t and that proportions are conditional on the previous proportions (only take into account those that survived previous t). For this we want to order survival times in order of increasing duration first, then calculate S(t) (the survival probability at time t) by multiplying surviving proportions in each step. The `survival` package does this for us. Ref: https://www.datacamp.com/community/tutorials/survival-analysis-R and http://www.sthda.com/english/wiki/cox-proportional-hazards-model
 
 ```{r}
-surv_object <- Surv(time = surv_df$Delta_time, event = surv_df$Censored)
-  surv_object # plus indicates a censored data point
+surv_object <- Surv(time = surv_df$Delta_time, # time to death
+                    event = surv_df$Censored) # Censored points: 0 = right censored (not a true death), 1 = event at time
   
 ```
 
@@ -115,7 +115,8 @@ Create a full cox proportional hazards regression model. Note that a hazard rati
 
 ```{r}
 full.coxph <- coxph(surv_object ~ Crab_treatment * Algae_treatment * Wounding_treatment, 
-                    data = surv_df)
+                    data = surv_df) # note response here must be a survival object returned by the Surv funtion (why we make the surv_object above)
+
 ```
 
 ## Model selection
@@ -170,10 +171,13 @@ AIC(full.coxph, coxph.1, coxph.2, coxph.3, coxph.4, coxph.5) # Nope, looks like 
 
 # set it as our model
 mCox <- coxph.3
+  summary(mCox) # see the model overall is also significant (Wald test, LRT, longrank)
 
 ```
 
 ## Plot hazards model
+
+Plot survival curves as a function of the different treatments
 
 ```{r}
 # first for JUST crabs:
@@ -192,7 +196,7 @@ alg_df <- with(surv_df,
 
 a.fit <- survfit(mCox, newdata = alg_df, data = surv_df)
 
-# for wounding:
+# for JUST wounding:
 w_df <- with(surv_df,
                data.frame(Crab_treatment = c("N", "N"), 
                           Algae_treatment = c("N", "N"),
@@ -200,7 +204,7 @@ w_df <- with(surv_df,
 
 w.fit <- survfit(mCox, newdata = w_df, data = surv_df)
 
-# then the crab interaction
+# for wounding AND crab interaction
 CW_df <- with(surv_df,
                 data.frame(Crab_treatment = c("Y", "Y", "N", "N"), 
                            Algae_treatment = c("N", "N", "N", "N"),
@@ -241,7 +245,21 @@ arrange_ggsurvplots(list(
 
 ## Test model assumptions
 
+We want to test that the hazards are proportional (don't change over time), which is assumed in the coxph model. We'll use scaled Schoenfled residuals, which are independent of time and should have a random pattern. The random assumption is supported by p > 0.05
 
+```{r}
+test.ph <- cox.zph(mCox) # meets this assumption
+  ggcoxzph(test.ph) # no pattern with time
+```
+
+Then we'll test whether there's a strong outlier pull/influential observations
+
+```{r}
+ggcoxdiagnostics(mCox, type = "dfbeta", # dfbeta "plots the estimated changes in the regression coefficients upon deleting each observation in turn"
+                 ggtheme = theme_bw()) 
+```
+
+- These look fairly symmetric so are going to leave everything as-is
 
 
 
