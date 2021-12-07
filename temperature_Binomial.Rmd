@@ -3,28 +3,58 @@ title: "Binomial tissue loss analysis"
 author: "Julianna Renzi"
 date: "12/7/2021"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse) # data manipulation
+require(here) # relative file paths
+require(lubridate) # dates and times
+require(wesanderson) # color palette
 ```
 
-## R Markdown
+# Bring in the data
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r}
+# this is the daily previous mean maximum water temperatures with a 4-day window
+tempMetrics <- read_csv(here("generated_data/temperature_metrics.csv"))
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+# this is the percent tissue loss on a nubbin on a given day (created in the tissue wrangling file)
+tissueLoss <- read_csv(here("generated_data/tissue_loss.csv"))
 ```
 
-## Including Plots
+Create our color palette from the Wes Anderson package
 
-You can also embed plots, for example:
+```{r}
+vibRed <- wes_palette("Darjeeling1", n = 5)[1]
+forGreen <- wes_palette("Darjeeling1", n = 5)[2]
+lightO <- wes_palette("Darjeeling1", n = 5)[3]
+darkO <- wes_palette("Darjeeling1", n = 5)[4]
+skyB <- wes_palette("Darjeeling1", n = 5)[5]
 
-```{r pressure, echo=FALSE}
-plot(pressure)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+# Make a tissue loss model that includes temperature
+
+Before doing any analyses, we want to remove observations from February 4th because that represents tissue loss since the first (multiple days), which is not comparable to the rest. We also want to attach temperature observations to our tissue loss data
+
+```{r}
+# remove the 4th
+tissueLoss %>% 
+  filter(Date != as.Date("2020-02-04")) %>% 
+  left_join(tempMetrics, key = Date) -> tissueLoss4
+
+```
+
+## Use a generalized linear model with a binomial family
+
+Because of the large number of zeros in the dataset, we'll use a binomial response variable (0 for no tissue loss, 1 for tissue loss)
+
+```{r}
+
+```
+
+
