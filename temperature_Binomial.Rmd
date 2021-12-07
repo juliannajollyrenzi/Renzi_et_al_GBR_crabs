@@ -14,6 +14,7 @@ require(tidyverse) # data manipulation
 require(here) # relative file paths
 require(lubridate) # dates and times
 require(wesanderson) # color palette
+require(broom) # logistic model fit
 ```
 
 # Bring in the data
@@ -47,6 +48,10 @@ tissueLoss %>%
   filter(Date != as.Date("2020-02-04")) %>% 
   left_join(tempMetrics, key = Date) -> tissueLoss4
 
+# do this without the "influential observation" (row 539 diagnosed using code below)
+tissueLoss4.f <- tissueLoss4[-539,]
+  
+
 ```
 
 ## Use a generalized linear model with a binomial family
@@ -54,7 +59,114 @@ tissueLoss %>%
 Because of the large number of zeros in the dataset, we'll use a binomial response variable (0 for no tissue loss, 1 for tissue loss)
 
 ```{r}
+# make a column for y/n tissue loss
+tissueLoss4.f$TissueBin <- ifelse(tissueLoss4.f$Perc_tissue_loss > 0.0, 1, 0)
+
+# make a model for the zeros
+m1 <- glm(TissueBin ~ Crab_treatment*Algae_treatment*Wounding_treatment*Mean_C_4, 
+          data = tissueLoss4.f, 
+          family = binomial(link = logit))
+
+
+step.bin <- step(m1, direction = "both")
+  summary(step.bin)
+```
+
+Make model predictions
+
+```{r}
+# make a dataframe to store predictions in
+pred <- expand.grid(Mean_C_4 = seq(min(tissueLoss4.f$Mean_C_4), max(tissueLoss4.f$Mean_C_4), by = 0.05), 
+                    Crab_treatment = c("Y", "N"), 
+                    Algae_treatment = c("Y", "N"), 
+                    Wounding_treatment = c("Y", "N"))
+
+# predict probability of ANY tissue loss
+pred$PredProb <- predict(step.bin, pred, type = "response") # response gives the predicted probabilities 
 
 ```
+
+Plot predictions
+
+```{r}
+# make labels nice
+crab.labs <- c("Crab", "No crab")
+names(crab.labs) <- c("Y", "N")
+
+
+pred %>% 
+  # use predicted data
+  ggplot(aes(x = Mean_C_4, y = PredProb, color = Algae_treatment, linetype = Wounding_treatment)) +
+  geom_line() +
+  scale_linetype_manual(values=c("solid", "dashed"),
+                        name = "Wounding") +
+  # add in actual data
+  geom_point(data = tissueLoss4.f, 
+             aes(x = Mean_C_4, y = TissueBin, color = Algae_treatment), 
+             alpha = 0.2) +
+  facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
+  ylab("Predicted probability of losing tissue") +
+  xlab("Average 4-day water temperature (°C)") +
+  scale_color_manual(values = c(forGreen, darkO),
+                     name = "Algae") +
+  theme_classic()
+
+```
+
+
+# Check assumptions
+
+## Linearity 
+
+Need to see whether there's linearity using this tutorial: http://www.sthda.com/english/articles/36-classification-methods-essentials/148-logistic-regression-assumptions-and-diagnostics-in-r/
+
+```{r}
+# make predictions 
+probabilities <- predict(step.bin, type = "response")
+predicted.classes <- ifelse(probabilities > 0.5, "pos", "neg")
+
+# Select only numeric predictors
+mydata <- tissueLoss4.f %>%
+  dplyr::select(Mean_C_4)  
+
+predictors <- colnames(mydata)
+
+# Bind the logit and tidy the data for plotting
+mydata <- mydata %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+
+# plot
+ggplot(mydata, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+```
+
+This generally looks linear to me, although it's a little weird because of the repeated temperature measures, I think
+
+## Outliers
+
+```{r}
+# look for outliers
+plot(step.bin, which = 4, id.n = 3)
+
+# Extract model results
+model.data <- augment(step.bin) %>% 
+  mutate(index = 1:n()) 
+
+model.data %>% top_n(3, .cooksd)
+
+
+ggplot(model.data, aes(index, .std.resid)) + 
+  geom_point(aes(color = TissueBin), alpha = .5) +
+  theme_bw()
+
+# look for influential points
+model.data %>% 
+  filter(abs(.std.resid) > 3) # this shows we're removed all "influential" observations (just one)
+```
+
 
 

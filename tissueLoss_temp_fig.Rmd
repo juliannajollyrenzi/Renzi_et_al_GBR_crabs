@@ -15,6 +15,7 @@ require(here) # relative file paths
 require(lubridate) # dates and times
 require(wesanderson) # color palette
 require(patchwork) # combining figures
+require(broom) # logistic model fit
 ```
 
 # Bring in the data
@@ -23,8 +24,8 @@ require(patchwork) # combining figures
 # this is the temperature time series from the experiment, with one value per date/time (averaged across HOBO loggers, with a value per few minutes)
 tempTimeseries <- read_csv(here("generated_data/hobo_timeseries.csv"))
 
-# this is the daily previous mean maximum water temperatures with a 4-day window
-avgMax4 <- read_csv(here("generated_data/temperature_metrics.csv"))
+# this is the daily previous mean water temperatures (different temperature summary options)
+tempMetrics <- read_csv(here("generated_data/temperature_metrics.csv"))
 
 # this is the percent tissue loss on a nubbin on a given day (created in the tissue wrangling file)
 tissueLoss <- read_csv(here("generated_data/tissue_loss.csv"))
@@ -52,9 +53,6 @@ tempTimeseries %>%
   filter(Date_time > as_datetime("2020-02-03 00:00:00")) %>% # just from the start of the tissue loss data
   ggplot(aes(x = Date_time, y = Mean_temp)) +
   geom_line() +
-  # plot the maximum/4 day  moving window as well
-  #geom_line(aes(x = as_datetime(Date), y = Mean_max_C_4), data = subset(avgMax4, Date > as_datetime("2020-02-03")), 
-  #          color = vibRed) +
   geom_hline(yintercept = 27.3, 
              color = vibRed, 
              linetype = "dotted") + # this is the Heron monthly mean water temp according to: https://seatemperature.info/heron-island-water-temperature.html and also word of mouth from Jesse + Gus
@@ -77,12 +75,12 @@ tempTimeseries %>%
 
 ```
 
-And how the maximum changes through time
+And how the mean 4-day window changes through time
 
 ```{r}
-avgMax4 %>% 
-  filter(Date > as.Date("2020-02-03", "%Y-%m-%d")) %>%  # just from the start of the tissue loss data
-  ggplot(aes(x = Date, y = Mean_max_C_4)) +
+tempMetrics %>% 
+  filter(Date > as.Date("2020-01-31", "%Y-%m-%d")) %>%  # just from the start of the tissue loss data
+  ggplot(aes(x = Date, y = Mean_C_4)) +
   geom_line() +
   geom_hline(yintercept = 27.3, 
              color = vibRed, 
@@ -99,10 +97,9 @@ avgMax4 %>%
            xmax = as.Date("2020-02-22", "%Y-%m-%d"), 
            ymin = -Inf, 
            ymax = Inf, fill = lightO, alpha = 0.2) +
-  ylab("Mean maximum temperature-4 day (°C)") +
-  xlab("Date") +
-  # make y limits match mean temperature figure
-  ylim(26, 33) -> maxTSFig
+  ylab("Mean temperature-4 day (°C)") +
+  xlab("Date") -> meanTSFig
+
 ```
 
 
@@ -126,8 +123,6 @@ names(crab.labs) <- c("Y", "N")
 
 
 avgTL %>%
-  # only want values after Feb 4 (4 is tissue loss over multiple days d)
-  filter(Date > as_datetime("2020-02-04 00:00:00")) %>% 
   ggplot(aes(x = Date, y = MeanTL, color = Algae_treatment, linetype = Wounding_treatment)) +
   geom_line() +
   scale_linetype_manual(values=c("solid", "dashed"),
@@ -154,93 +149,140 @@ avgTL %>%
 
 # Make a tissue loss model that includes temperature
 
-Before doing any analyses, we want to remove observations from February 4th because that represents tissue loss since the first (multiple days), which is not comparable to the rest. We also want to attach temperature observations to our tissue loss data
+Before doing any analyses, we want to remove observations from February 4th because that represents tissue loss since the first (multiple days), which is not comparable to the rest. We also want to attach temperature observations to our tissue loss data and remove one influential observation (row 539) found using Cook's distance
 
 ```{r}
 # remove the 4th
 tissueLoss %>% 
   filter(Date != as.Date("2020-02-04")) %>% 
-  left_join(avgMax4, key = Date) -> tissueLoss4
+  left_join(tempMetrics, key = Date) -> tissueLoss4
 
+# we also want to remove the "influential observation" (row 539 diagnosed using code below)
+tissueLoss4.f <- tissueLoss4[-539,]
 ```
 
-## Use a generalized linear model
+## Use a generalized linear model with a binomial family
 
-Start with the full model with all terms and their interactions
+Because of the large number of zeros in the dataset, we'll use a binomial response variable (0 for no tissue loss, 1 for tissue loss)
 
 ```{r}
-mGaus <- glm(Perc_tissue_loss ~ Crab_treatment*Algae_treatment*Wounding_treatment*Mean_max_C_4,
-             data = tissueLoss4,
-             family = gaussian(link = "identity"))  
+# make a column for y/n tissue loss
+tissueLoss4.f$TissueBin <- ifelse(tissueLoss4.f$Perc_tissue_loss > 0.0, 1, 0)
 
+# make a model for the zeros
+m1 <- glm(TissueBin ~ Crab_treatment*Algae_treatment*Wounding_treatment*Mean_C_4, 
+          data = tissueLoss4.f, 
+          family = binomial(link = logit))
+
+
+step.bin <- step(m1, direction = "both")
+  summary(step.bin)
 ```
 
-Then use a stepwise selection process to pick the most parsimonious model
-
-```{r}
-mGaus.step <- step(mGaus, direction = "both")
-  summary(mGaus.step) 
-  
-```
-
-## Predict model values
+Make model predictions
 
 ```{r}
 # make a dataframe to store predictions in
-pred <- expand.grid(Mean_max_C_4 = seq(min(tissueLoss4$Mean_max_C_4), max(tissueLoss4$Mean_max_C_4), by = 0.05), 
+pred <- expand.grid(Mean_C_4 = seq(min(tissueLoss4.f$Mean_C_4), max(tissueLoss4.f$Mean_C_4), by = 0.05), 
                     Crab_treatment = c("Y", "N"), 
                     Algae_treatment = c("Y", "N"), 
                     Wounding_treatment = c("Y", "N"))
 
-# predict percent amount of tissue loss
-pred$PredTissueLoss <- predict(mGaus.step, pred, type = "response") 
+# predict probability of ANY tissue loss
+pred$PredProb <- predict(step.bin, pred, type = "response") # response gives the predicted probabilities 
 
 ```
 
-## Plot
+### Plot predictions
 
 ```{r}
 # make labels nice
 crab.labs <- c("Crab", "No crab")
 names(crab.labs) <- c("Y", "N")
 
-# make it match the panel above
-pred %>% 
-  mutate(Crab_treatment = factor(Crab_treatment, levels = c("N", "Y"))) -> pred
 
-
-# plot
 pred %>% 
-  # use predicted data 
-  ggplot(aes(x = Mean_max_C_4, y = PredTissueLoss, color = Algae_treatment, linetype = Wounding_treatment)) +
+  # use predicted data
+  ggplot(aes(x = Mean_C_4, y = PredProb, color = Algae_treatment, linetype = Wounding_treatment)) +
   geom_line() +
-  scale_linetype_manual(values=c("dashed", "solid"),
+  scale_linetype_manual(values=c("solid", "dashed"),
                         name = "Wounding") +
+  # add in actual data
+  geom_point(data = tissueLoss4.f, 
+             aes(x = Mean_C_4, y = TissueBin, color = Algae_treatment), 
+             alpha = 0.2) +
   facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
-  ylab("Predicted daily tissue loss (%)") +
-  xlab("Mean maximum temperature-4 day (°C)") +
+  ylab("Predicted probability of losing tissue") +
+  xlab("Average 4-day water temperature (°C)") +
   scale_color_manual(values = c(forGreen, darkO),
-                     name = "Algae") + # clean up legend and colors
-  theme_classic() +
-  theme(legend.position = "none") -> modelfig
-
+                     name = "Algae") +
+  theme_classic() -> modelfig
 
 ```
 
-**Statistically significant terms**
-All terms *except*:
-- Wounding 
-- Wounding:temperature
-- Wounding:crab
-- Wounding:crab:temperature
 
 **Observations from the plot**
 See that: 
-- Temperature had the largest effect on tissue loss when there was no crab, algae, and no wounding
-- Temperature had very little effect on tissue loss when there was a crab present, although if there was algae this relationship steepened (looks about parallel with no algae/no crab)
-- Algae increased the amount of tissue lost
-- Wounding appears to decrease the strength of the relationship between temperature and crabs/algae/tissue loss
- 
+- Temperature generally increases the probability of losing tissue
+- Having algal contact increases the probability of losing tissue
+- Wounding increases tissue loss without a crab, but decreases tissue loss with a crab (like survival results)
+- The effect of temperature (slope) is less when there is a crab present and when there is no algae present (looks about parallel with no algae + crab)
+- Temperature had the largest effect on tissue loss when there was no crab, algae, and wounding
+
+
+# Check assumptions
+
+## Linearity 
+
+Need to see whether there's linearity using this tutorial: http://www.sthda.com/english/articles/36-classification-methods-essentials/148-logistic-regression-assumptions-and-diagnostics-in-r/
+
+```{r}
+# make predictions 
+probabilities <- predict(step.bin, type = "response")
+predicted.classes <- ifelse(probabilities > 0.5, "pos", "neg")
+
+# Select only numeric predictors
+mydata <- tissueLoss4.f %>%
+  dplyr::select(Mean_C_4)  
+
+predictors <- colnames(mydata)
+
+# Bind the logit and tidy the data for plotting
+mydata <- mydata %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+
+# plot
+ggplot(mydata, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+```
+
+This generally looks linear to me, although it's a little weird because of the repeated temperature measures, I think
+
+## Outliers
+
+```{r}
+# look for outliers
+plot(step.bin, which = 4, id.n = 3)
+
+# Extract model results
+model.data <- augment(step.bin) %>% 
+  mutate(index = 1:n()) 
+
+model.data %>% top_n(3, .cooksd)
+
+
+ggplot(model.data, aes(index, .std.resid)) + 
+  geom_point(aes(color = TissueBin), alpha = .5) +
+  theme_bw()
+
+# look for influential points
+model.data %>% 
+  filter(abs(.std.resid) > 3) # this shows we're removed all "influential" observations (just one)
+```
 
 
 # Combine figures 
@@ -250,7 +292,7 @@ To save these figures as a PDF in the figures folder, remove the pound signs bef
 ```{r}
 # pdf(file = here("figures/tissueLTempseries.pdf"), width = 8.5, height = 10)
 
-(tempTSFig + maxTSFig) / (tissueLFig) / (modelfig)
+(tempTSFig + meanTSFig) / (tissueLFig) / (modelfig)
 
 # dev.off()
 ```
