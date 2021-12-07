@@ -136,16 +136,31 @@ Really heat stress accumulates, so it makes sense to summarize the few days lead
 ```{r}
 temp_time_avgs %>% 
   group_by(Day) %>% 
-  summarize(Max_C = max(Mean_temp)) %>% 
+  summarize(Max_C = max(Mean_temp),
+            # add mean
+            Mean_C = mean(Mean_temp)) %>% 
   mutate(Prev_max_C = lag(Max_C), 
          Max_C_2 = lag(Max_C) + lag(Max_C, 2),
          Max_C_3 = lag(Max_C) + lag(Max_C, 2) + lag(Max_C, 3),
          Max_C_4 = lag(Max_C) + lag(Max_C, 2) + lag(Max_C, 3) + lag(Max_C, 4), # stop at 4 because that's the max amount of time we have before the first observation
+         Max_C_5 = lag(Max_C) + lag(Max_C, 2) + lag(Max_C, 3) + lag(Max_C, 4) + lag(Max_C, 5),
+         Max_C_6 = lag(Max_C) + lag(Max_C, 2) + lag(Max_C, 3) + lag(Max_C, 4)+ lag(Max_C, 5) + lag(Max_C, 6),
+         Max_C_7 = lag(Max_C) + lag(Max_C, 2) + lag(Max_C, 3) + lag(Max_C, 4) + lag(Max_C, 5) + lag(Max_C, 6) + lag(Max_C, 7),
          # also we'll calculate the mean Max_C, which is probably more understandable (daily value)
          Mean_max_C_Prev = Prev_max_C,
          Mean_max_C_2 = Max_C_2/2,
          Mean_max_C_3 = Max_C_3/3,
-         Mean_max_C_4 = Max_C_4/4) -> all_temp # df with cumulative mean max temperatures of preceding days 
+         Mean_max_C_4 = Max_C_4/4,
+         Mean_max_C_5 = Max_C_5/5,
+         Mean_max_C_6 = Max_C_5/6,
+         Mean_max_C_7 = Max_C_5/7,
+         # add mean temperatures as well
+         Prev_mean_C = lag(Mean_C), 
+         Mean_C_2 = lag(Mean_C) + lag(Mean_C, 2),
+         Mean_C_3 = lag(Mean_C) + lag(Mean_C, 2) + lag(Mean_C, 3),
+         Mean_C_4 = lag(Mean_C) + lag(Mean_C, 2) + lag(Mean_C, 3) + lag(Mean_C, 4),
+         Mean_C_4 = Mean_C_4/4
+         ) -> all_temp # df with cumulative mean max temperatures of preceding days 
 
 ```
 
@@ -155,7 +170,7 @@ Here we'll save the metric that we think is most interesting (4 day average maxi
 
 ```{r}
 all_temp %>% 
-  select(Day, Mean_max_C_4) %>% 
+  dplyr::select(Day, Mean_max_C_4, Mean_C_4, Mean_max_C_5, Mean_max_C_6, Mean_max_C_7) %>% 
   rename(Date = Day) %>% # to match the response matrix
   drop_na() -> temp_metrics
 
