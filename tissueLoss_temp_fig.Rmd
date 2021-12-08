@@ -41,6 +41,10 @@ lightO <- wes_palette("Darjeeling1", n = 5)[3]
 darkO <- wes_palette("Darjeeling1", n = 5)[4]
 skyB <- wes_palette("Darjeeling1", n = 5)[5]
 
+
+# and specify text size
+txt_sz <- 15 
+
 ```
 
 
@@ -69,8 +73,11 @@ tempTimeseries %>%
            ymin = -Inf, 
            ymax = Inf, fill = lightO, alpha = 0.2) +
   ylab("Water temperature (°C)") +
-  xlab("Date") +
-  ylim(26, 33) -> tempTSFig
+  xlab("") +
+  ylim(26, 33)  +
+  # change text size
+  theme(text = element_text(size = txt_sz)) +
+  ggtitle("(a)") -> tempTSFig
   
 
 ```
@@ -98,7 +105,10 @@ tempMetrics %>%
            ymin = -Inf, 
            ymax = Inf, fill = lightO, alpha = 0.2) +
   ylab("Mean temperature-4 day (°C)") +
-  xlab("Date") -> meanTSFig
+  xlab("") +
+  # change text size
+  theme(text = element_text(size = txt_sz)) +
+  ggtitle("(b)") -> meanTSFig
 
 ```
 
@@ -129,7 +139,7 @@ avgTL %>%
                         name = "Wounding") +
   facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
   ylab("Average tissue loss (%)") +
-  xlab("Date") +
+  xlab("") +
   scale_color_manual(values = c(darkO, forGreen),
                      name = "Algae") + # clean up legend and colors
   theme_classic() +
@@ -143,7 +153,10 @@ avgTL %>%
            xmin = as.Date("2020-02-15 00:00:00", "%Y-%m-%d"), 
            xmax = as.Date("2020-02-22 00:00:00", "%Y-%m-%d"), 
            ymin = -Inf, 
-           ymax = Inf, fill = lightO, alpha = 0.2) -> tissueLFig
+           ymax = Inf, fill = lightO, alpha = 0.2) +
+  # change text size
+  theme(text = element_text(size = txt_sz)) +
+  ggtitle("(c)") -> tissueLFig
 ```
 
 
@@ -216,7 +229,10 @@ pred %>%
   xlab("Average 4-day water temperature (°C)") +
   scale_color_manual(values = c(forGreen, darkO),
                      name = "Algae") +
-  theme_classic() -> modelfig
+  theme_classic() +
+  # change text size
+  theme(text = element_text(size = txt_sz)) +
+  ggtitle("(d)") -> modelfig
 
 ```
 
@@ -290,9 +306,9 @@ model.data %>%
 To save these figures as a PDF in the figures folder, remove the pound signs before the `pdf()` and `dev.off()`
 
 ```{r}
-# pdf(file = here("figures/tissueLTempseries.pdf"), width = 8.5, height = 10)
+# pdf(file = here("figures/tissueLTempseries.pdf"), width = 9.5, height = 11)
 
-(tempTSFig + meanTSFig) / (tissueLFig) / (modelfig)
+(tempTSFig + meanTSFig) / (tissueLFig) / (modelfig) 
 
 # dev.off()
 ```
