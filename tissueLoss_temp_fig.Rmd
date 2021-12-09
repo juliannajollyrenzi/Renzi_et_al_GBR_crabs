@@ -54,7 +54,7 @@ Look at how the temperature changes over time
 
 ```{r}
 tempTimeseries %>% 
-  filter(Date_time > as_datetime("2020-02-03 00:00:00")) %>% # just from the start of the tissue loss data
+  filter(Date_time > as_datetime("2020-02-01 00:00:00")) %>% # just from the start of the tissue loss data
   ggplot(aes(x = Date_time, y = Mean_temp)) +
   geom_line() +
   geom_hline(yintercept = 27.3, 
@@ -86,7 +86,7 @@ And how the mean 4-day window changes through time
 
 ```{r}
 tempMetrics %>% 
-  filter(Date > as.Date("2020-01-31", "%Y-%m-%d")) %>%  # just from the start of the tissue loss data
+  filter(Date > as.Date("2020-02-01", "%Y-%m-%d")) %>%  # just from the start of the tissue loss data
   ggplot(aes(x = Date, y = Mean_C_4)) +
   geom_line() +
   geom_hline(yintercept = 27.3, 
@@ -119,7 +119,11 @@ Get the average tissue loss by treatment (average tissue loss across the treatme
 
 ```{r}
 tissueLoss %>% 
-  group_by(Crab_treatment, Algae_treatment, Wounding_treatment, Date) %>% 
+  # update this for the first day of the experiment (no tissue loss)
+  mutate(Date = case_when(
+    Date == as.Date("2020-01-31") ~ as.Date("2020-02-01"),
+    TRUE ~ Date)) %>% 
+  group_by(Crab_treatment, Algae_treatment, Wounding_treatment, Date) %>%
   summarize(MeanTL = mean(Perc_tissue_loss)) -> avgTL
 ```
 
@@ -168,6 +172,10 @@ Before doing any analyses, we want to remove observations from February 4th beca
 # remove the 4th
 tissueLoss %>% 
   filter(Date != as.Date("2020-02-04")) %>% 
+  # update this for the first day of the experiment (no tissue loss)
+  mutate(Date = case_when(
+    Date == as.Date("2020-01-31") ~ as.Date("2020-02-01"),
+    TRUE ~ Date)) %>% 
   left_join(tempMetrics, key = Date) -> tissueLoss4
 
 # we also want to remove the "influential observation" (row 539 diagnosed using code below)
