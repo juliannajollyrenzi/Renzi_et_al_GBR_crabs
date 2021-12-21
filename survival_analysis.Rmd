@@ -15,7 +15,7 @@ require(here) # relative file paths
 require(lubridate) # dates and times
 require(wesanderson) # color palette
 require(patchwork) # combining figures
-require(survival) # surviavl analysis
+require(survival) # survival analysis
 require(survminer) # plotting survival curves
 ```
 
