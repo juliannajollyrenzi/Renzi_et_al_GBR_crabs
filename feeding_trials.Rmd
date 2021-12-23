@@ -102,12 +102,16 @@ shapiro.test(cyclFeed$Percent_loss) # Normal
 Run t-tests
 
 ```{r}
-t.test(ctrlFeed$Algal_loss, cyclFeed$Algal_loss, 
+t.test(ctrlFeed$Algal_loss, 
+       cyclFeed$Algal_loss, 
        var.equal = FALSE, 
        alternative = "two.sided") # significant
+
+# we use percent
 t.test(ctrlFeed$Percent_loss, 
        cyclFeed$Percent_loss, 
-       var.equal = FALSE, alternative = "two.sided") # significant
+       var.equal = FALSE, 
+       alternative = "two.sided") # significant
 ```
 
 # Summary stats
@@ -115,9 +119,11 @@ t.test(ctrlFeed$Percent_loss,
 ```{r}
 ## Summary stats----
 percLoss %>% 
+  group_by(Species) %>% 
   summarize(N = n(), 
-            Mean_inital_g = mean(Initial_weight_g), 
-            sd_inital_g = sd(Initial_weight_g))
+            Mean_inital_g = mean(Initial_weight_g),
+            sd_inital_g = sd(Initial_weight_g),
+            Mean_per_loss = mean(Percent_loss))
 
 percLoss %>% 
   group_by(Species) %>% 
