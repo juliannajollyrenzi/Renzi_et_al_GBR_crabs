@@ -198,6 +198,7 @@ m1 <- glm(TissueBin ~ Crab_treatment*Algae_treatment*Wounding_treatment*Mean_C_4
 
 step.bin <- step(m1, direction = "both")
   summary(step.bin)
+  
 ```
 
 Make model predictions
