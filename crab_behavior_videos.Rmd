@@ -1,0 +1,29 @@
+---
+title: "Crab feeding behavior"
+author: "Julianna Renzi"
+date: "4/21/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(here)
+require(tidyverse)
+```
+
+# Bring in the data
+
+```{r}
+# bring in the csv that has the percent cover of each nubbin, determined beforehand using ImageJ
+perCover <- read_csv(here("data/ImageJ_crab_feeding.csv"))
+
+# bring in the bite count data from the videos
+behavior <- read_csv(here("data/Crab_feed_behavior.csv"))
+```
+
+
+
+
