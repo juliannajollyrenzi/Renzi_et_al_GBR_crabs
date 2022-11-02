@@ -180,19 +180,19 @@ mCox <- coxph.3
 Plot survival curves as a function of the different treatments
 
 ```{r}
-# first for JUST crabs:
+# first for crabs AND algae + crab:
 crab_df <- with(surv_df,
-               data.frame(Crab_treatment = c("Y", "N"), 
-                          Algae_treatment = c("N", "N"),
-                          Wounding_treatment = c("N", "N")))
+               data.frame(Crab_treatment = c("Y", "Y", "N"), 
+                          Algae_treatment = c("N", "Y", "N"),
+                          Wounding_treatment = c("N", "N", "N")))
   
 c.fit <- survfit(mCox, newdata = crab_df, data = surv_df)
 
-# for JUST algae:
+# for algae AND algae + crab:
 alg_df <- with(surv_df,
-                data.frame(Crab_treatment = c("N", "N"), 
-                           Algae_treatment = c("Y", "N"),
-                           Wounding_treatment = c("N", "N")))
+                data.frame(Crab_treatment = c("N", "Y", "N"), 
+                           Algae_treatment = c("Y", "Y", "N"),
+                           Wounding_treatment = c("N", "N", "N")))
 
 a.fit <- survfit(mCox, newdata = alg_df, data = surv_df)
 
@@ -215,7 +215,7 @@ cw.fit <- survfit(mCox, newdata = CW_df, data = surv_df)
 
 
 # plot them all
-ggsurvplot(c.fit, conf.int = TRUE, legend.labs=c("Crab = Y", "Crab = N"),
+ggsurvplot(c.fit, conf.int = TRUE, legend.labs=c("Crab", "Crab + Algae", "Control"),
            ggtheme = theme_classic())
 ggsurvplot(cw.fit, conf.int = TRUE, legend.labs=c("Crab + Wounding", "Crab", "Wounding", "Control"),
            ggtheme = theme_classic())
@@ -226,32 +226,32 @@ fnt_sz <- 15
 leg_pos <- "top"
 
 arrange_ggsurvplots(list(
-  ggsurvplot(c.fit, conf.int = TRUE, legend.labs=c("Yes", "Control"),
+  ggsurvplot(c.fit, conf.int = TRUE, legend.labs=c("Crab", "Crab + Algae", "Control"),
              ggtheme = theme_classic(base_size = fnt_sz),
              legend = leg_pos,
-             palette = c(skyB, lightO), 
-             legend.title = "(a) Crab", conf.int.alpha = 0.1, 
+             palette = c(skyB, lightO, "darkgray"), 
+             legend.title = "(a)", conf.int.alpha = 0.1, 
              xlab="Time (days)"),
-  ggsurvplot(a.fit, legend.labs=c("Yes", "Control"),
+  ggsurvplot(a.fit, legend.labs=c("Algae", "Crab + Algae", "Control"),
              ggtheme = theme_classic(base_size = fnt_sz), 
              legend = leg_pos,
-             palette = c(forGreen , lightO), 
-             legend.title = "(c) Algae", conf.int = TRUE, 
+             palette = c(forGreen , lightO, "darkgray"), 
+             legend.title = "(c)", conf.int = TRUE, 
              conf.int.alpha=0.1, 
              xlab="Time (days)"),
-  ggsurvplot(w.fit, data = surv_df, legend.labs=c("Yes", "Control"),
+  ggsurvplot(w.fit, data = surv_df, legend.labs=c("Wounding", "Control"),
              ggtheme = theme_classic(base_size = fnt_sz), 
              legend = leg_pos,
-             palette = c(darkO, lightO), 
-             legend.title = "(b) Wounding", 
+             palette = c(darkO, "darkgray"), 
+             legend.title = "(b)", 
              conf.int = TRUE, 
              conf.int.alpha=0.1, 
              xlab="Time (days)"),
   ggsurvplot(cw.fit, legend.labs=c("C+W", "C", "W", "Control"),
              ggtheme = theme_classic(base_size = fnt_sz), 
              legend = leg_pos,
-             palette = c(vibRed, skyB, darkO, lightO), 
-             legend.title = "(d) Interaction", 
+             palette = c(vibRed, skyB, darkO, "darkgray"), 
+             legend.title = "(d)", 
              conf.int = TRUE, 
              conf.int.alpha=0.1, 
              xlab="Time (days)")),
@@ -260,6 +260,9 @@ arrange_ggsurvplots(list(
  ggsave(here("figures/survivalCurves.pdf"), plts_coxph, width = 10, height = 8)
 
 ```
+
+
+
 
 ## Test model assumptions
 
@@ -275,6 +278,8 @@ Then we'll test whether there's a strong outlier pull/influential observations
 ```{r}
 ggcoxdiagnostics(mCox, type = "dfbeta", # dfbeta "plots the estimated changes in the regression coefficients upon deleting each observation in turn"
                  ggtheme = theme_bw()) 
+
+
 ```
 
 - These look fairly symmetric so are going to leave everything as-is

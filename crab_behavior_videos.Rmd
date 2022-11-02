@@ -109,7 +109,7 @@ strauss_long %>%
   scale_fill_brewer(palette="Oranges") + 
   geom_point(alpha = 0.5) +
   theme_classic() +
-  theme(text = element_text(size=15), legend.position="none") +
+  theme(text = element_text(size=18), legend.position="none") +
   xlab("") +
   ylim(-1, 1) +
   stat_summary(geom = 'text', label = c("a", "b", "c"), fun.y = max, vjust = -1, size=6, color = c("black", "black", "black")) # add letters for significance
