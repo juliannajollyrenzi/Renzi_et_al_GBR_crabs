@@ -12,7 +12,6 @@ knitr::opts_chunk$set(echo = TRUE)
 
 require(tidyverse)
 require(here)
-
 require(nlme)
 ```
 
@@ -22,7 +21,47 @@ require(nlme)
 algae <- read_csv(here("data/field_experiment/algae_weight.csv"))
 
 size <- read_csv(here("data/field_experiment/colony_specs.csv"))
+
+monitoring <- read_csv(here("data/field_experiment/colony_monitoring.csv"))
 ```
+
+# Make sure initial treatments were the same
+
+```{r}
+algae %>% 
+  select(NW_algae_initial_weight, W_algae_intial_weight, Colony_ID) %>% 
+  pivot_longer(cols = c(NW_algae_initial_weight, W_algae_intial_weight),
+               names_to = "Treatment", 
+               values_to = "Biomass") -> init_biomass
+
+```
+
+Plot
+
+```{r}
+init_biomass %>% 
+  ggplot(aes(x = Treatment, y = Biomass, fill = Treatment)) +
+  geom_boxplot() +
+  ylab("Initial biomass (g)") +
+  scale_fill_brewer(palette="Oranges") + 
+  geom_point(alpha = 0.5) +
+  theme_classic() +
+  theme(text = element_text(size=18), legend.position="none") +
+  xlab("") +
+  # rename categories
+  scale_x_discrete(labels = c('No wounding','Wounding'))
+
+```
+
+Looks like wounding is a little higher. Check to see if this is a significant difference:
+
+```{r}
+init.M <- aov(Biomass ~ Treatment, data = init_biomass)
+  summary(init.M) # looks okay
+```
+
+Although they're not different, probably makes sense to do % biomass loss
+
 
 # Look at percent change
 
@@ -44,28 +83,48 @@ algae %>%
 perc_change %>% 
   ggplot(aes(x = Treatment, y = Percent_change)) +
   geom_boxplot() +
-  ylab("Biomass lass loss (%)") +
+  ylab("Biomass loss (%)") +
   theme_bw()
 ```
 
+```{r}
+perc_change %>% 
+  mutate(Percent_change = 100*Percent_change) %>% 
+  ggplot(aes(x = Treatment, y = Percent_change, fill = Treatment)) +
+  geom_boxplot() +
+  ylab("Biomass loss (%)") +
+  scale_fill_brewer(palette="Oranges") + 
+  geom_point(alpha = 0.5) +
+  theme_classic() +
+  theme(text = element_text(size=18), legend.position="none") +
+  xlab("") +
+  # rename categories
+  scale_x_discrete(labels = c('No wounding','Wounding'))
 
-## Stats?
+ggsave(here("figures/field_algal_loss.jpg"), height = 4, width = 6)
+
+```
+
+
+
+
+
+## Percent stats
+
+Want a random effect for Coral colony, since we use a paired design with 1 patch of each treatment/coral. Helps account for flow, etc.
 
 ```{r}
-m.Perc <- aov(Percent_change ~ Treatment, 
-              data = perc_change) # 0.07
-  summary(m.Perc)
-
-# there should acutally be a random effect for coral, right?
-# used: https://stats.stackexchange.com/questions/22988/how-to-obtain-the-p-value-check-significance-of-an-effect-in-a-lme4-mixed-mode
-
-m.PercRE <- lme(Percent_change~Treatment,random=~1|Colony_ID,data=perc_change)
+m.PercRE <- lme(Percent_change~Treatment, 
+                random=~1|Colony_ID, 
+                data=perc_change)
   anova(m.PercRE) # Cool! 
 
   
 ```
 
 # Look at total change
+
+This is not presented in the paper, but useful to check that they show the same effect
 
 ```{r}
 algae %>% 
@@ -77,7 +136,7 @@ algae %>%
                values_to = "Biomass_change") -> biom_change
 ```
 
-## Plot percent
+## Plot total loss
 
 ```{r}
 biom_change %>% 
@@ -88,15 +147,13 @@ biom_change %>%
 ```
 
 
-## Stats?
+## Total loss stats
 
 ```{r}
-m.Biom <- aov(Biomass_change ~ Treatment, 
-              data = biom_change) 
-  summary(m.Biom) # 0.0235
-  
 # with random effect
-m.BiomRE <- lme(Biomass_change~Treatment,random=~1|Colony_ID,data=biom_change)
+m.BiomRE <- lme(Biomass_change~Treatment, 
+                random=~1|Colony_ID, 
+                data=biom_change)
   anova(m.BiomRE) # Cool! 
 ```
 

@@ -1,4 +1,4 @@
-﻿Colony_ID,# of crabs initially seen,crab activity observed,NO WOUND_algae remaining_T1,NW_T2,NW_T3,NW_T4,NW_T5,NW_T6,WOUNDS_algae remaining_T1,W_T2,W_T3,W_T4,W_T5,W_T6,NOTES
+﻿Colony_ID,num_crabs_initially_seen,crab activity observed,NO WOUND_algae remaining_T1,NW_T2,NW_T3,NW_T4,NW_T5,NW_T6,WOUNDS_algae remaining_T1,W_T2,W_T3,W_T4,W_T5,W_T6,NOTES
 198,1,clearing algae on camera at T0,1,1,1,1,1,1,1,1,1,1,1,1,only halimeda left on wound after T2
 160,2,,1,1,1,1,1,1,1,1,1,1,1,1,
 161,1,,1,1,1,1,1,1,1,1,1,1,1,1,
