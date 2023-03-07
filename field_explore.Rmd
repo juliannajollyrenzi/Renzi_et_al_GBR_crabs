@@ -1,0 +1,104 @@
+---
+title: "Field data explore"
+author: "Julianna Renzi"
+date: "3/3/2023"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse)
+require(here)
+
+require(nlme)
+```
+
+# Read in algae data
+
+```{r}
+algae <- read_csv(here("data/field_experiment/algae_weight.csv"))
+
+size <- read_csv(here("data/field_experiment/colony_specs.csv"))
+```
+
+# Look at percent change
+
+```{r}
+algae %>% 
+  mutate(NW_change = NW_algae_initial_weight - NW_final_weight,
+         W_change = W_algae_intial_weight - W_final_weight) %>%
+  mutate(NW_perc_change = NW_change/NW_algae_initial_weight,
+         W_perc_change = W_change/W_algae_intial_weight) %>%
+  select(Colony_ID, NW_perc_change, W_perc_change) %>% 
+  pivot_longer(cols = c(NW_perc_change, W_perc_change),
+               names_to = "Treatment", 
+               values_to = "Percent_change") -> perc_change
+```
+
+## Plot percent
+
+```{r}
+perc_change %>% 
+  ggplot(aes(x = Treatment, y = Percent_change)) +
+  geom_boxplot() +
+  ylab("Biomass lass loss (%)") +
+  theme_bw()
+```
+
+
+## Stats?
+
+```{r}
+m.Perc <- aov(Percent_change ~ Treatment, 
+              data = perc_change) # 0.07
+  summary(m.Perc)
+
+# there should acutally be a random effect for coral, right?
+# used: https://stats.stackexchange.com/questions/22988/how-to-obtain-the-p-value-check-significance-of-an-effect-in-a-lme4-mixed-mode
+
+m.PercRE <- lme(Percent_change~Treatment,random=~1|Colony_ID,data=perc_change)
+  anova(m.PercRE) # Cool! 
+
+  
+```
+
+# Look at total change
+
+```{r}
+algae %>% 
+  mutate(NW_change = NW_algae_initial_weight - NW_final_weight,
+         W_change = W_algae_intial_weight - W_final_weight) %>%
+  select(Colony_ID, NW_change, W_change) %>% 
+  pivot_longer(cols = c(NW_change, W_change),
+               names_to = "Treatment", 
+               values_to = "Biomass_change") -> biom_change
+```
+
+## Plot percent
+
+```{r}
+biom_change %>% 
+  ggplot(aes(x = Treatment, y = Biomass_change)) +
+  geom_boxplot() +
+  ylab("Biomass loss (g)") +
+  theme_bw()
+```
+
+
+## Stats?
+
+```{r}
+m.Biom <- aov(Biomass_change ~ Treatment, 
+              data = biom_change) 
+  summary(m.Biom) # 0.0235
+  
+# with random effect
+m.BiomRE <- lme(Biomass_change~Treatment,random=~1|Colony_ID,data=biom_change)
+  anova(m.BiomRE) # Cool! 
+```
+
+
+

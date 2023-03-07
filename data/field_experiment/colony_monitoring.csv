@@ -1,0 +1,21 @@
+﻿Colony_ID,# of crabs initially seen,crab activity observed,NO WOUND_algae remaining_T1,NW_T2,NW_T3,NW_T4,NW_T5,NW_T6,WOUNDS_algae remaining_T1,W_T2,W_T3,W_T4,W_T5,W_T6,NOTES
+198,1,clearing algae on camera at T0,1,1,1,1,1,1,1,1,1,1,1,1,only halimeda left on wound after T2
+160,2,,1,1,1,1,1,1,1,1,1,1,1,1,
+161,1,,1,1,1,1,1,1,1,1,1,1,1,1,
+199,3,,1,1,1,1,1,1,1,1,1,1,1,1,algae on wound almost gone T5
+164,1,,1,1,1,1,1,1,1,1,1,1,1,1,
+162,2,,1,1,1,1,1,1,1,1,1,0,0,0,algae on wound gone T4
+163,2,,1,1,1,1,1,1,1,1,1,1,1,1,
+165,1,,1,1,0,0,0,0,1,1,1,1,1,1,algae on wound almost gone at T2; algae on no wound gone T2
+167,1,,1,1,1,1,1,1,1,1,1,1,1,1,algae on wound almost gone at T4
+166,3,,1,1,1,1,1,1,1,1,1,1,1,1,algae on wound almost gone at T3
+169,2,,1,1,1,1,1,1,1,1,1,1,1,1,
+168,1,,1,1,1,1,1,1,1,1,1,1,1,1,
+121,1,,1,1,1,1,1,1,1,1,1,1,1,1,
+118,1,,1,1,1,1,1,1,1,1,1,1,1,1,
+195,1,,1,1,1,1,1,1,1,0,0,0,0,0,algae on wound gone T2
+122,1,,1,1,1,1,1,1,1,1,0,0,0,0,algae on wound almost gone at T1; algae on wound gone T3
+197,2,,1,1,1,1,0,0,1,1,1,0,0,0,algae on wound gone T4; algae on no wound gone T5
+240,1,,1,1,1,1,1,1,1,1,1,1,1,1,
+241,1,,1,1,1,1,1,1,1,1,1,1,1,1,
+242,1,,1,1,1,1,1,1,1,1,1,1,1,1,algae on wound almost gone at T3 only caulerpa left

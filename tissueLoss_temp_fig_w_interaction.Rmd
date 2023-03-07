@@ -16,6 +16,9 @@ require(lubridate) # dates and times
 require(wesanderson) # color palette
 require(patchwork) # combining figures
 require(broom) # logistic model fit
+
+require(lme4)
+require(boot) # for inv.logit
 ```
 
 # Bring in the data
@@ -189,150 +192,12 @@ Because of the large number of zeros in the dataset, we'll use a binomial respon
 ```{r}
 # make a column for y/n tissue loss
 tissueLoss4.f$TissueBin <- ifelse(tissueLoss4.f$Perc_tissue_loss > 0.0, 1, 0)
-
-# make a model for the zeros
-m1 <- glm(TissueBin ~ Crab_treatment*Algae_treatment*Wounding_treatment*Mean_C_4, 
-          data = tissueLoss4.f, 
-          family = binomial(link = logit))
-
-
-step.bin <- step(m1, direction = "both")
-  summary(step.bin)
   
 ```
 
-Make model predictions
+Make the full mixed model
 
 ```{r}
-# make a dataframe to store predictions in
-pred <- expand.grid(Mean_C_4 = seq(min(tissueLoss4.f$Mean_C_4), max(tissueLoss4.f$Mean_C_4), by = 0.05), 
-                    Crab_treatment = c("Y", "N"), 
-                    Algae_treatment = c("Y", "N"), 
-                    Wounding_treatment = c("Y", "N"))
-
-# predict probability of ANY tissue loss
-pred$PredProb <- predict(step.bin, pred, type = "response") # response gives the predicted probabilities 
-
-```
-
-### Plot predictions
-
-```{r}
-# make labels nice
-crab.labs <- c("Crab", "No crab")
-names(crab.labs) <- c("Y", "N")
-
-
-pred %>% 
-  # use predicted data
-  ggplot(aes(x = Mean_C_4, y = PredProb, color = Algae_treatment, linetype = Wounding_treatment)) +
-  geom_line() +
-  scale_linetype_manual(values=c("dashed", "solid"),
-                        name = "Wounding") +
-  # add in actual data
-  geom_point(data = tissueLoss4.f, 
-             aes(x = Mean_C_4, y = TissueBin, color = Algae_treatment), 
-             alpha = 0.2) +
-  facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
-  ylab("Predicted probability of losing tissue") +
-  xlab("Average 4-day water temperature (°C)") +
-  scale_color_manual(values = c(forGreen, darkO),
-                     name = "Algae") +
-  theme_classic() +
-  # change text size
-  theme(text = element_text(size = txt_sz)) +
-  ggtitle("(d)") -> modelfig
-
-```
-
-
-**Observations from the plot**
-See that: 
-- Temperature generally increases the probability of losing tissue
-- Having algal contact increases the probability of losing tissue
-- Wounding increases tissue loss without a crab, but decreases tissue loss with a crab (like survival results)
-- The effect of temperature (slope) is less when there is a crab present and when there is no algae present (looks about parallel with no algae + crab)
-- Temperature had the largest effect on tissue loss when there was no crab, algae, and wounding
-
-
-# Check assumptions
-
-## Linearity 
-
-Need to see whether there's linearity using this tutorial: http://www.sthda.com/english/articles/36-classification-methods-essentials/148-logistic-regression-assumptions-and-diagnostics-in-r/
-
-```{r}
-# make predictions 
-probabilities <- predict(step.bin, type = "response")
-predicted.classes <- ifelse(probabilities > 0.5, "pos", "neg")
-
-# Select only numeric predictors
-mydata <- tissueLoss4.f %>%
-  dplyr::select(Mean_C_4)  
-
-predictors <- colnames(mydata)
-
-# Bind the logit and tidy the data for plotting
-mydata <- mydata %>%
-  mutate(logit = log(probabilities/(1-probabilities))) %>%
-  gather(key = "predictors", value = "predictor.value", -logit)
-
-# plot
-ggplot(mydata, aes(logit, predictor.value))+
-  geom_point(size = 0.5, alpha = 0.5) +
-  geom_smooth(method = "loess") + 
-  theme_bw() + 
-  facet_wrap(~predictors, scales = "free_y")
-```
-
-This generally looks linear to me, although it's a little weird because of the repeated temperature measures, I think
-
-## Outliers
-
-```{r}
-# look for outliers
-plot(step.bin, which = 4, id.n = 3)
-
-# Extract model results
-model.data <- augment(step.bin) %>% 
-  mutate(index = 1:n()) 
-
-model.data %>% top_n(3, .cooksd)
-
-
-ggplot(model.data, aes(index, .std.resid)) + 
-  geom_point(aes(color = TissueBin), alpha = .5) +
-  theme_bw()
-
-# look for influential points
-model.data %>% 
-  filter(abs(.std.resid) > 3) # this shows we're removed all "influential" observations (just one)
-```
-
-
-# Combine figures 
-
-To save these figures as a PDF in the figures folder, remove the pound signs before the `pdf()` and `dev.off()`
-
-```{r}
-# pdf(file = here("figures/tissueLTempseries.pdf"), width = 9.5, height = 11)
-
-(tempTSFig + meanTSFig) / (tissueLFig) / (modelfig) 
-
-# dev.off()
-```
-
-
-# Try a mixed model
-
-```{r}
-require(lme4)
-# require(effects) # for interactions
-require(boot) # for inv.logit
-
-# make a column for y/n tissue loss
-tissueLoss4.f$TissueBin <- ifelse(tissueLoss4.f$Perc_tissue_loss > 0.0, 1, 0)
-
 # make a mixed model for the zeros
 m1 <- glmer(TissueBin ~ Crab_treatment*Algae_treatment*Wounding_treatment*scale(Mean_C_4) + (1|Coral_ID), 
           data = tissueLoss4.f, 
@@ -341,9 +206,8 @@ m1 <- glmer(TissueBin ~ Crab_treatment*Algae_treatment*Wounding_treatment*scale(
                                optCtrl = list(maxfun=2e5))) # this last line just helps it fit 
 
 summary(m1)
-
-# SKIPPING STEPWISE SELECTION--use full model
 ```
+
 
 
 ## Check assumptions
@@ -376,12 +240,11 @@ ggplot(mydata, aes(logit, predictor.value))+
   facet_wrap(~predictors, scales = "free_y")
 ```
 
-This generally looks linear to me, although it's a little weird because of the repeated temperature measures, I think
+This generally looks linear to me, although it's a little weird because of the repeated temperature measures
 
 ### Outliers
 
 ```{r}
-
 # Extract model results
 model.data <- augment(m1) %>% 
   mutate(index = 1:n()) 
@@ -426,7 +289,6 @@ pred %>%
 
 
 # plot
-  
 pred_avg %>% 
   # use predicted data
   ggplot(aes(x = Mean_C_4, y = Mean_prob, color = Algae_treatment, linetype = Wounding_treatment)) +
@@ -445,55 +307,26 @@ pred_avg %>%
   theme_classic() +
   # change text size
   theme(text = element_text(size = txt_sz)) +
-  ggtitle("(d)") #-> modelfig
+  ggtitle("(d)") -> modelfig
 
 ```
 
+# Combine figures 
 
-## Plot on log odds scale
+To save these figures as a PDF in the figures folder, remove the pound signs before the `pdf()` and `dev.off()`
 
 ```{r}
-# make a dataframe to store predictions in
-predLO <- expand.grid(Mean_C_4 = seq(min(tissueLoss4.f$Mean_C_4), max(tissueLoss4.f$Mean_C_4), by = 0.05), 
-                    Crab_treatment = c("Y", "N"), 
-                    Algae_treatment = c("Y", "N"), 
-                    Wounding_treatment = c("Y", "N"),
-                    Coral_ID = 1:80)
+# pdf(file = here("figures/tissueLTempseries.pdf"), width = 9.5, height = 11)
 
-# generate predictions
-predLO$PredProb <- predict(m1, predLO)
+(tempTSFig + meanTSFig) / (tissueLFig) / (modelfig) 
 
-# get the average across corals
-predLO %>% 
-  group_by(Crab_treatment, Algae_treatment, Wounding_treatment, Mean_C_4) %>% 
-  summarize(Mean_prob = mean(PredProb), SE = sd(PredProb)/sqrt(n())) -> pred_avgLO
-
-
-# plot
-  
-pred_avgLO %>% 
-  # use predicted data
-  ggplot(aes(x = Mean_C_4, y = Mean_prob, color = Algae_treatment, linetype = Wounding_treatment)) +
-  geom_line() +
-  scale_linetype_manual(values=c("dashed", "solid"),
-                        name = "Wounding") +
-  # add in actual data
-  #geom_point(data = tissueLoss4.f, 
-  #           aes(x = Mean_C_4, y = TissueBin, color = Algae_treatment), 
-   #          alpha = 0.2) +
-  facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
-  ylab("Log odds of losing tissue") +
-  xlab("Average 4-day water temperature (°C)") +
-  scale_color_manual(values = c(forGreen, darkO),
-                     name = "Algae") +
-  theme_classic() +
-  # change text size
-  theme(text = element_text(size = txt_sz)) +
-  ggtitle("(d)") #-> modelfig
-
+# dev.off()
 ```
 
-# Now try to make an interactions plot
+
+# Make an interactions plot
+
+First, get the coefficients from our full model
 
 ```{r}
 # get fixed effects 
@@ -518,7 +351,7 @@ CAWTemp <- as.numeric(fixef(m1)[16]) # crab:algae:wounding:temp
 
 ```
 
-Make the equation and plot over a range of temperature values
+Then, use the equation from the model to plot the sum of the interactions (no main effects) over a range of temperature values
 
 ```{r}
 # get the value of temperatures we want to predict over
@@ -534,16 +367,16 @@ int_table <- tibble(
 Full interaction equation looks like: 
 
 *intercept + CA + CW + AW + CTemp + ATemp + WTemp + CAW + CATemp + CWTemp + AWTemp + CAWTemp*
-- Where a term goes away if it's not in the interaction
+- A term goes away if it's not in the interaction 
 
 ```{r}
 # look at the effects of just the interactions (no fixed effects) to determine synergy/antagonism/etc.
 
 # generate a function that will generate the effect
-# this only works if you've specified C/CA/etc. above (could change that)
+# this only works if you've specified C/CA/etc. above (could change that) and it is specific to our model
 get_interaction <- function(Crab_p, Algae_p, Wounding_p, Temp_p, Temp_range) {
   # the parameters are all presences ("p") of each treatment
-  impact <- # intercept + 
+  impact <- 
     (CA*Crab_p*Algae_p) + 
     (CW*Crab_p*Wounding_p) + 
     (AW*Algae_p*Wounding_p) + 
@@ -555,7 +388,7 @@ get_interaction <- function(Crab_p, Algae_p, Wounding_p, Temp_p, Temp_range) {
     (CWTemp*Crab_p*Wounding_p*Temp_p)*Temp_range + 
     (AWTemp*Algae_p*Wounding_p*Temp_p)*Temp_range + 
     (CAWTemp*Crab_p*Algae_p*Wounding_p*Temp_p)*Temp_range
-  #impact_response <- exp(impact) 
+  
   return(impact)
 }
 
@@ -568,7 +401,7 @@ crabalgT <- (CA + CTemp*temp_range + ATemp*temp_range + CATemp*temp_range) # rem
 
 ```
 
-**IS IT RIGHT TO JUST TAKE THE INVERSE LOGIT? ASK. Also how to get the temperature back on an easier to understand scale**
+## Generate interaction estimates across a temperature range
 
 ```{r}
 # make columns for different interactions
@@ -630,10 +463,7 @@ int_table %>%
                                     Temp_range = temp_range)) -> int_effects
 ```
 
-
-## Plot it
-
-Change it into long format (easier to plot)
+Change the values into long format so they're easier to plot
 
 ```{r}
 int_effects %>% 
@@ -648,287 +478,30 @@ int_effects %>%
 ```
 
 
-From the internet: An odds ratio of 1.46 means Smoking multiplies by 1.46 the probability of having heart disease compared to non-smokers. If β = – 0.38, then eβ = 0.68 and the interpretation becomes: smoking is associated with a 32% (1 – 0.68 = 0.32) reduction in the relative risk of heart disease.
+A reminder from the internet: "An odds ratio of 1.46 means Smoking multiplies by 1.46 the probability of having heart disease compared to non-smokers. If β = – 0.38, then eβ = 0.68 and the interpretation becomes: smoking is associated with a 32% (1 – 0.68 = 0.32) reduction in the relative risk of heart disease."
 
-Log odds (what we plot below) I believe is neutral at 0, then is less likely in negatives and more likely in positives
+Log odds (what we plot below) is neutral at 0, then is less likely in negatives and more likely in positives
 
-```{r}
-int_plot %>% 
-  filter(Temperature == "Y") %>% 
-  ggplot(aes(x = T_range, y = Log_odds, color = Algae, linetype = Wounding)) +
-  scale_color_manual(values = c(darkO, forGreen),
-                     name = "Algae") + 
-  geom_line() +
-  geom_hline(yintercept = 0) +
-  scale_linetype_manual(values=c("solid", "dashed"),
-                        name = "Wounding") +
-  ylab("Marginal change in log odds of tissue loss") +
-  xlab("Temperature (scaled)") +
-  theme_bw() +
-  facet_wrap(.~Crab, labeller = label_both) 
-  
-```
+## Get standard errors
 
-
-
-How do we get standard errors? Try for no temperature interactions
+Make a function that will estimate the variance of a combination of linear terms using this equation: https://stats.stackexchange.com/questions/160230/variance-of-linear-combinations-of-correlated-random-variables 
 
 ```{r}
-emmeans(m1, ~ Crab_treatment * Algae_treatment * Wounding_treatment) %>% 
-  as.data.frame() %>% 
-  rename(Crab = Crab_treatment,
-         Algae = Algae_treatment,
-         Wounding = Wounding_treatment) -> noTse
-
-
-# can we join it then plot?
-int_plot %>% 
-  filter(Temperature == "N") %>% 
-  inner_join(noTse, by = c("Crab", "Algae", "Wounding")) %>% 
-  ggplot(aes(x = Interactions, y = Log_odds, color = Crab, linetype = Wounding)) +
-  scale_color_manual(values = c(vibRed, skyB),
-                     name = "Crab") +
-  geom_point(aes(x = Interactions, y = Log_odds)) +
-  geom_errorbar(aes(ymin = Log_odds-(SE*qnorm(0.975)), # 95% confidence intervals
-                    ymax = Log_odds+(SE*qnorm(0.975))), 
-                width=.2,
-                 position=position_dodge(0.05)) +
-  ylab("Marginal change in log odds of tissue loss") +
-  xlab("") +
-  geom_hline(yintercept = 0) +
-  
-  scale_x_discrete(breaks=c("A_W","C_A","C_A_W", "C_W"),
-        labels=c("Algae:Wound", "Algae:Crab", "Algae:Crab:Wound", "Crab:Wound")) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 35, hjust=  1)) 
-
-```
-
-Or do I need to do it like suggested here: https://cran.r-project.org/web/packages/lme4/vignettes/lmer.pdf ?
-
-In which case it would look like:
-
-```{r}
-confint(m1, method = "Wald")
-
-as.data.frame(confint(m1, method = "Wald")) %>% 
-  rownames_to_column(var = "Term") %>% 
-  # get rid of this row
-  filter(Term != ".sig01") %>% 
-  # add columns to separate these out
-  mutate(Crab = case_when(str_detect(Term, pattern = "Crab") ~ "Y", TRUE ~ "N"),
-         Algae = case_when(str_detect(Term, pattern = "Algae") ~ "Y", TRUE ~ "N"),
-         Wounding = case_when(str_detect(Term, pattern = "Wounding") ~ "Y", TRUE ~ "N"),
-         Temperature = case_when(str_detect(Term, pattern = "Mean_C_4") ~ "Y", TRUE ~ "N")) %>% 
-  filter(Temperature != "Y") -> waldplot
-```
-
-Join then plot
-
-```{r}
-# can we join it then plot?
-int_plot %>% 
-  filter(Temperature == "N") %>% 
-  inner_join(waldplot, by = c("Crab", "Algae", "Wounding", "Temperature")) %>% 
-  ggplot(aes(x = Interactions, y = Log_odds, color = Crab, linetype = Wounding)) +
-  scale_color_manual(values = c(vibRed, skyB),
-                     name = "Crab") +
-  geom_point(aes(x = Interactions, y = Log_odds)) +
-  #geom_errorbar(aes(ymin = `2.5 %`, # 95% confidence intervals
-   #                 ymax = `97.5 %`, 
-   #             width=.2)) +
-  ylab("Marginal change in log odds of tissue loss") +
-  xlab("") +
-  geom_hline(yintercept = 0) +
-  
-  scale_x_discrete(breaks=c("A_W","C_A","C_A_W", "C_W"),
-        labels=c("Algae:Wound", "Algae:Crab", "Algae:Crab:Wound", "Crab:Wound")) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 35, hjust=  1)) 
-
-```
-
-
-Hmmm I think yes the error bars are not correct. Need to figure out how to get those 
-
-## Error bars
-
-First get covariance matrix
-
-```{r}
-vcov.m1 <- vcov(m1)
-```
-
-Code below is probably not useful come back later
-
-```{r}
-# varCA <- vcov.m1["Crab_treatmentY:Algae_treatmentY", "Crab_treatmentY:Algae_treatmentY"]
-# varCW <- vcov.m1["Crab_treatmentY:Wounding_treatmentY", "Crab_treatmentY:Wounding_treatmentY"]
-```
-
-
-Then zero out the terms we're not interested in
-
-```{r}
-vcov.m1[4:16,] = 0 
-vcov.m1[,4:16] = 0
-
-```
-
-Get coefficients
-
-```{r}
-coeffic <- fixef(m1)
-coeffic_mat<- coeffic%*%t(coeffic)
-coeffic_mat[4:16,]=0
-coeffic_mat[,4:16]=0
-
-
-var.fe <- sum(coeffic_mat * vcov.m1)
-```
-
-```{r}
-# by hand:
-var.fe2 <- as.numeric(coeffic[1])^2*vcov.m1[1,1] + as.numeric(coeffic[2])^2*vcov.m1[2,2] + as.numeric(coeffic[3])^2*vcov.m1[3,3] + 2*coeffic[1]*coeffic[2]*vcov.m1[1,2] + 2*coeffic[2]*coeffic[3]*vcov.m1[2,3] + 2*coeffic[1]*coeffic[3]*vcov.m1[1,3]
-
-
-```
-
-## Make it a function
-
-```{r}
-get_variance <- function(coeff_vector, vcov_matrix, term_list) { # create a function to get the variance of a linear combination of some of these terms
-  # coeff_vector = a vector of model coefficients in the same order as cov_matrix, but with 1's, 0's or temperature ranges. Can get from fixef(your_model)
+get_variance <- function(Crab_p, Algae_p, Wounding_p, Temp_p, Temp_range, vcov_matrix) { 
+  # create a function to get the variance of a linear combination of correlated random variables
+  # the parameters are all presences ("p") of each treatment (should be a 1 or 0)
+  # temp_range is a vector of *scaled* temperature values you want variances for 
   # vcov_matrix = a variance covariance matrix from the model. Can get from vcov(model)
-  # term_list = a list of coefficients from your model that you want to include in the calculation
-  
-  # first, make a vector with the correct dimensions/labels, but with zeros to use as a mask
-  mask <- coeff_vector
-  mask[] = 0
-  # then, populate items we care about (on the term_list) with 1's
-  for (term in 1:length(term_list)) 
-  { 
-    mask[(term_list[term])] = 1 # set item to 1
-  }
-  
-  # then make coefficient vector zeros where needed
-  coeff_vector <- mask*coeff_vector
-  
-  # then make a coefficient matrix
-  coeffic_mat <- coeff_vector %*% t(coeff_vector)
-  
-  # then sum to get the variance
-  var <- sum(coeffic_mat*vcov_matrix)
-  return(var)
-  
-}
-```
-
-Test
-
-```{r}
-# by function:
-get_variance(coeff_vector = fixef(m1), 
-             vcov_matrix = vcov(m1), 
-             term_list = c("Wounding_treatmentY", "Crab_treatmentY", "Algae_treatmentY"))
-
-# by hand:
-vcov.m1 <- vcov(m1)
-
-as.numeric(coeffic[4])^2*vcov.m1[4,4] + as.numeric(coeffic[2])^2*vcov.m1[2,2] + as.numeric(coeffic[3])^2*vcov.m1[3,3] + 2*coeffic[4]*coeffic[2]*vcov.m1[4,2] + 2*coeffic[2]*coeffic[3]*vcov.m1[2,3] + 2*coeffic[4]*coeffic[3]*vcov.m1[4,3] # nice
-```
-
-
-## Function again
-
-```{r}
-get_variance <- function(coeff_vector, vcov_matrix) { # create a function to get the variance of a linear combination of some of these terms
-  # coeff_vector = a vector of model coefficients in the same order as cov_matrix, but with 1's, 0's or temperature ranges. Can get from fixef(your_model) then alter by doing variable[]=0, variable[variable of interest]=1, variable[variable of interest]= temp:range
-  # vcov_matrix = a variance covariance matrix from the model. Can get from vcov(model)
-  # term_list = a list of coefficients from your model that you want to include in the calculation
-  
-  # make a coefficient matrix
-  coeffic_mat <- coeff_vector %*% t(coeff_vector)
-  
-  # then sum to get the variance
-  var <- sum(coeffic_mat*vcov_matrix)
-  return(var)
-  
-}
-```
-
-
-Try
-
-```{r}
-coeff_vector <- fixef(m1)
-coeff_vector[]=0
-coeff_vector["Crab_treatmentY"]=1
-coeff_vector["Wounding_treatmentY"]=1
-coeff_vector["scale(Mean_C_4)"] = [[seq(from = -2, to = 2, length.out = 24)]]
-
-
-```
-
-
-```{r}
-get_interaction <- function(Crab_p, Algae_p, Wounding_p, Temp_p, Temp_range) {
-  # the parameters are all presences ("p") of each treatment
-  # temp_range is a vector of temperature ranges you want variances for 
-  variance <-
-    (Crab_p*Algae_p) + 
-    (Crab_p*Wounding_p) + 
-    (Algae_p*Wounding_p) + 
-    (Crab_p*Temp_p)*Temp_range + 
-    (Algae_p*Temp_p)*Temp_range + 
-    (Wounding_p*Temp_p)*Temp_range + 
-    (Crab_p*Algae_p*Wounding_p) + 
-    (Crab_p*Algae_p*Temp_p)*Temp_range + 
-    (Crab_p*Wounding_p*Temp_p)*Temp_range + 
-    (Algae_p*Wounding_p*Temp_p)*Temp_range + 
-    (Crab_p*Algae_p*Wounding_p*Temp_p)*Temp_range
-  #impact_response <- exp(impact) 
-  return(variance)
-}
-```
-
-
-
-# Add errors?
-
-Need sample sizes
-
-```{r}
-
-
-
-```
-
-## Try function again
-
-```{r}
-get_variance <- function(Crab_p, Algae_p, Wounding_p, Temp_p, Temp_range, vcov_matrix) { # create a function to get the variance of a linear combination of some of these terms
-  # the parameters are all presences ("p") of each treatment
-  # temp_range is a vector of temperature ranges you want variances for 
-  # vcov_matrix = a variance covariance matrix from the model. Can get from vcov(model)
-  
   
   # coeff_matrix = this is a matrix of 11 columns (or # of terms you have) by 50 rows (or however many temperature values you want to predict for). Terms included should be "1" down the column and terms excluded should be "0". Terms with temperature should use the temperature range
   coeff_matrix <- matrix(0, nrow = length(Temp_range), ncol = dim(vcov_matrix)[1])
   colnames(coeff_matrix) <- colnames(vcov_matrix) # add names back
-  #coeff_matrix[] <- 1 # sets all to 1
   
-  # populate values needed for temperature
-  #for (col in 1:length(colnames(coeff_matrix))) {
-  #  vect <- case_when(str_detect(colnames(coeff_matrix)[col], pattern = "Mean_C_4") ~ Temp_range,
-  #                  TRUE ~ rep(1, length(Temp_range)))
-  #  coeff_matrix[,col] <- vect
-  #}
   
   # put zeros where needed
   # for main effects (just looking at interaction terms)
   coeff_matrix[,1:5]=0
-  # for other irrelevant terms
+  # for other terms:
   coeff_matrix[,"Crab_treatmentY:Algae_treatmentY"] = Crab_p*Algae_p
   coeff_matrix[,"Crab_treatmentY:Wounding_treatmentY"] = Crab_p*Wounding_p
   coeff_matrix[,"Algae_treatmentY:Wounding_treatmentY"] = Algae_p*Wounding_p
@@ -988,7 +561,7 @@ vcov.m1["Crab_treatmentY:Algae_treatmentY", "Crab_treatmentY:Algae_treatmentY"] 
 
 ## Try to plot?
 
-Get variances for the lines. Should be sqrt(variance)*1.96 for 95% CIs. Add this to the int_plot data frame
+Get variances for the lines. Should be sqrt(variance)*1.96 for 95% CIs (sample size is included in variance in this case). Add this to the int_plot data frame
 
 ```{r}
 int_plot %>% 
@@ -1010,16 +583,16 @@ int_plot %>%
                                  vcov_matrix = vcov(m1))) %>% 
   mutate(CI95 = 1.96*sqrt(Variance)) -> int_variance
 
-# clean up the dataframe by switching factors back to factors
+# clean up the dataframe by switching factors back to factors (better for plotting/treating as factors)
 int_variance %>% 
   select(-Crab, -Wounding, -Algae, -Temperature) %>% 
   left_join(int_plot, by = c("T_range", "Interactions", "Log_odds")) -> int_variance_fact
 ```
 
-
-### Plot temp graph
+## Plot interactions
 
 ```{r}
+ pdf(file = here("figures/interactions.pdf"), width = 8, height = 6)
 
 int_variance_fact %>% 
   filter(Temperature == "Y") %>% 
@@ -1035,11 +608,14 @@ int_variance_fact %>%
   scale_fill_manual(values = c(lightO, skyB),
                      name = "Wounding") +
   
-  ylab("Marginal change in log odds of tissue loss") +
+  ylab("Change in log odds of tissue loss") +
   xlab("Temperature (scaled)") +
-  theme_bw() +
+  theme_classic() +
+  theme(text = element_text(size = txt_sz)) +
   facet_grid(Crab ~Algae, labeller = label_both) 
+
+ dev.off()
   
 ```
 
-What can we say about that? That it looks like 
+
