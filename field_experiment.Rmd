@@ -118,6 +118,7 @@ m.PercRE <- lme(Percent_change~Treatment,
                 random=~1|Colony_ID, 
                 data=perc_change)
   anova(m.PercRE) # Cool! 
+  plot(m.PercRE)
 
   
 ```

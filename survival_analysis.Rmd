@@ -27,10 +27,11 @@ require(survminer) # plotting survival curves
 deathDat <- read_csv(here("data/Coral_survival.csv"))
 
 ```
+
 # Prepare the data
 
 ```{r}
-# calculate number of days to death (this is easy because the experiment started at the beginning of the month)
+# calculate number of days to death (this is easy because the experiment started at the beginning of the month. Start is 31, which is 0, then first is 1, etc.)
 deathDat %>% 
   mutate(Death_day = as.character(Death_day)) %>% 
   rowwise %>% 
@@ -289,7 +290,409 @@ ggcoxdiagnostics(mCox, type = "dfbeta", # dfbeta "plots the estimated changes in
 
 
 
+# Time dependent covariate with timedep
 
+Using the `timedep` tutorial as guidance:
+
+```{r}
+newcgd <- tmerge(data1 = cgd0[,1:13], 
+                 data2 = cgd0, 
+                 id = id, 
+                 tstop = futime)
+
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime1))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime2))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime3))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime4))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime5))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime6))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime7))
+```
+
+
+
+## Bring in temperature data
+
+Need temperature data as well
+
+```{r}
+temp <- read_csv(here("generated_data/temperature_metrics.csv"))
+
+# also want a list of all days the corals were observed, which we can get from the tissue loss data
+tissueL <- read_csv(here("generated_data/tissue_loss.csv")) 
+```
+
+
+Join with survival data
+
+```{r}
+tdata <- surv_df %>% 
+  mutate(Date = as.Date(Death_day, format = c("%m/%d/%y"))) %>% 
+  left_join(temp) %>% 
+  select(Coral_ID, Delta_time, Mean_C_4) 
+```
+
+I think need a df with every day the corals were observed as well as their status?
+
+```{r}
+# get temperatures on given days
+tissueL %>% 
+  select(Date) %>% 
+  unique() %>% 
+  mutate(Day = ifelse(day(Date) == 31, 0, day(Date))) %>%  
+  # the start of the experiment is on the 31st, which is time 0, then first of the next month is 1, etc. (just worked out conveniently)
+  left_join(temp) -> temptime
+
+```
+
+Use tissue loss dataframe where we already have a row for each day a coral was photographed
+
+```{r}
+tissueL %>% 
+  select(Coral_ID, Date) %>% 
+  full_join(temptime) -> fullLoss
+  
+# join with death days to make a status category
+surv_df %>% 
+  select(Coral_ID, Delta_time, Censored) %>% 
+  # get a column that will match with fullLoss 
+  mutate(Day = Delta_time) %>% 
+  full_join(fullLoss, by = c("Coral_ID", "Day")) %>% 
+  # now NA's are 0 (coral is alive) and 1's are deaths, unless they're censored
+  mutate(Status = case_when(
+    !is.na(Delta_time) & Censored == 1 ~ 1,
+    TRUE ~ 0
+  )) -> timeData
+```
+
+Then make a tstart and tstop
+
+```{r}
+timeData %>% 
+  mutate(tstart = case_when(Day == 0 ~ 0, 
+                            # since we only checked all on the first day, this window spans day 1-4 (could have happened any time in there)
+                            Day == 4 ~ 1, 
+                            # all other cases, start day is the day before
+                            TRUE ~ Day-1)) %>% 
+  mutate(tstop = case_when(Day == 0 ~ 1,
+                           TRUE ~ Day)) %>% 
+  select( -Delta_time) -> timeData2
+
+surv_df %>% 
+  select(-Censored) %>% 
+  # join with original data
+  full_join(timeData2) -> timeDepdf
+```
+
+
+Run time-dependent version
+
+
+```{r}
+
+mTime <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment * Algae_treatment * Wounding_treatment * Mean_C_4, 
+      cluster = Coral_ID,
+      data = timeDepdf)
+
+
+# why is there an NA for Mean_C_4?
+```
+
+Now we want to winnow down the terms
+
+```{r}
+coxph.1T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Algae_treatment:Mean_C_4 +
+                    Crab_treatment:Wounding_treatment:Mean_C_4 +
+                    Algae_treatment:Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+summary(coxph.1T)
+```
+
+
+```{r}
+coxph.2T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Algae_treatment:Mean_C_4 +
+                    Crab_treatment:Wounding_treatment:Mean_C_4 +
+                    Algae_treatment:Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.2T)
+
+anova(coxph.1T, coxph.2T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.3T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Algae_treatment:Mean_C_4 +
+                    Crab_treatment:Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.3T)
+
+anova(coxph.2T, coxph.3T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.4T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Mean_C_4 +
+                    Crab_treatment:Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.4T)
+
+anova(coxph.3T, coxph.4T, test = 'Chisq') # no difference
+
+```
+
+
+
+Drop another term
+
+```{r}
+coxph.5T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.5T)
+
+anova(coxph.4T, coxph.5T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.6T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.6T)
+
+anova(coxph.5T, coxph.6T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.7T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.7T)
+
+anova(coxph.6T, coxph.7T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.8T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.8T)
+
+anova(coxph.7T, coxph.8T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.9T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.9T)
+
+anova(coxph.8T, coxph.9T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.10T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Wounding_treatment +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.10T)
+
+anova(coxph.9T, coxph.10T, test = 'Chisq') # no difference
+
+```
+
+
+
+Drop another term
+
+```{r}
+coxph.11T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.11T)
+
+anova(coxph.10T, coxph.11T, test = 'Chisq') # p = 0.05--stop at model 10
+
+```
+
+
+```{r}
+timeMod <- coxph.10T
+```
+
+## Interpret
+
+```{r}
+coxPred <- expand_grid(Crab_treatment = c("Y", "N"),
+                       Algae_treatment = c("Y", "N"),
+                       Wounding_treatment = c("Y", "N"),
+                       Mean_C_4 = seq(from = min(timeDepdf$Mean_C_4),
+                                      to = max(timeDepdf$Mean_C_4),
+                                      length.out = 20))
+preds <- predict(timeMod, newdata = coxPred,
+        type = "lp") 
+
+# join together
+coxPred$Pred_linearPredictor <- preds
+```
+
+Plot
+
+```{r}
+coxPred %>% 
+  ggplot(aes(x = Mean_C_4, y = Pred_linearPredictor, color = Algae_treatment)) +
+  geom_line(aes(linetype = Wounding_treatment)) +
+  facet_wrap(~Crab_treatment) +
+  theme_classic() +
+  ylab("Predicted linear predictor") +
+  xlab("Mean temperature over the past 4 days (deg C)")
+```
+
+Also risk
+
+```{r}
+preds <- predict(timeMod, newdata = coxPred,
+        type = "risk") # this gives exp(linear predictor)
+
+# join together
+coxPred$Pred_risk <- preds
+```
+
+
+```{r}
+coxPred %>% 
+  ggplot(aes(x = Mean_C_4, y = Pred_risk, color = Algae_treatment)) +
+  geom_line(aes(linetype = Wounding_treatment)) +
+  facet_wrap(~Crab_treatment,
+             labeller = label_both) +
+  theme_classic() +
+  ylab("Predicted risk") +
+  xlab("Mean temperature over the past 4 days (deg C)")
+```
 
 
 

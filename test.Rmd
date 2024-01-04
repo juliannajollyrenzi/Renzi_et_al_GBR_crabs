@@ -1,0 +1,307 @@
+---
+title: 'Test: model comparison'
+author: "Julianna Renzi"
+date: "3/21/2023"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse)
+require(here)
+require(lubridate)
+require(survival) # survival analysis
+require(lme4)
+require(boot) # for inv.logit
+require(wesanderson)
+```
+
+# Bring in data
+
+
+```{r}
+# Here are the temperature metrics for the days of the experiment, calculated from the HOBO loggers in the temperature_wrangling script
+tempMetrics <- read_csv(here("generated_data/temperature_metrics.csv"))
+
+# we also want a list of all days the corals were observed, which we can get from the tissue loss data:
+tissueLoss <- read_csv(here("generated_data/tissue_loss.csv")) 
+
+# this is a CSV with the day each coral "died"/was pulled from the experiment
+# corals had a censored value of "0" if they either (1) made it to the end of the experiment without "dying" or (2) were dropped/broke (corals 7 and 29)
+deathDat <- read_csv(here("data/Coral_survival.csv"))
+```
+
+
+
+# Survivial analysis
+
+
+## Prepare the data
+
+First make the survival dataframe
+
+```{r}
+# calculate number of days to death (this is easy because the experiment started at the beginning of the month. Start is 31, which is 0, then first is 1, etc.)
+deathDat %>% 
+  mutate(Death_day = as.character(Death_day)) %>% 
+  rowwise %>% 
+  mutate(Delta_time = str_split(Death_day, "/")[[1]][2]) %>% 
+  mutate(Delta_time = as.numeric(Delta_time)) -> surv_df
+```
+
+Then for the timedep format
+
+Going to use the tissue loss dataframe where we already have a row for each day a coral was photographed
+
+```{r}
+# get temperatures on given days
+tissueLoss %>% 
+  # for first day of the experiment (no tissue loss on 2020-02-01)
+  mutate(Date = case_when(
+    Date == as.Date("2020-01-31") ~ as.Date("2020-02-01"),
+    TRUE ~ Date)) %>% 
+  select(Date) %>% 
+  unique() %>% 
+  mutate(Day = day(Date)) %>%  
+  left_join(tempMetrics) -> temptime
+
+
+# join with temperture data
+tissueLoss %>% 
+  mutate(Date = case_when(
+    Date == as.Date("2020-01-31") ~ as.Date("2020-02-01"),
+    TRUE ~ Date)) %>% 
+  select(Coral_ID, Date) %>% 
+  full_join(temptime) -> fullLoss
+  
+# join with death days to make a status (dead/alive) binary category
+surv_df %>% 
+  select(Coral_ID, Delta_time, Censored) %>% 
+  # get a column that will match with fullLoss 
+  mutate(Day = Delta_time) %>% 
+  full_join(fullLoss, by = c("Coral_ID", "Day")) %>% 
+  # now NA's are 0 (coral is alive) and 1's are deaths, unless they're censored
+  mutate(Status = case_when(
+    !is.na(Delta_time) & Censored == 1 ~ 1,
+    TRUE ~ 0
+  )) -> timeData
+```
+
+
+## Make a tstart and tstop
+
+```{r}
+timeData %>% 
+  mutate(tstart = case_when(Day == 0 ~ 0, 
+                            # since we only checked all on the first day, this window spans day 1-4 (could have happened any time in there)
+                            Day == 4 ~ 1, 
+                            # all other cases, start day is the day before
+                            TRUE ~ Day-1)) %>% 
+  mutate(tstop = case_when(Day == 0 ~ 1,
+                           TRUE ~ Day)) %>% 
+  select( -Delta_time) -> timeData2
+
+# join back with the original data
+surv_df %>% 
+  select(-Censored) %>% 
+  full_join(timeData2) -> timeDepdf
+```
+
+# Run time-dependent model version 
+
+Note: model selection done in other script
+
+```{r}
+timemod <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Wounding_treatment +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(timemod)
+
+```
+
+
+Also, try it without temperature
+
+```{r}
+
+timemod2 <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Crab_treatment:Wounding_treatment,
+                  data = timeDepdf)
+
+
+summary(timemod2)
+
+
+```
+
+
+
+## Interpret
+
+```{r}
+coxPred <- expand_grid(Crab_treatment = c("Y", "N"),
+                       Algae_treatment = c("Y", "N"),
+                       Wounding_treatment = c("Y", "N"),
+                       Mean_C_4 = seq(from = min(timeDepdf$Mean_C_4),
+                                      to = max(timeDepdf$Mean_C_4),
+                                      length.out = 20))
+preds <- predict(timemod, newdata = coxPred,
+        type = "lp") 
+
+# join together
+coxPred$Pred_linearPredictor <- preds
+```
+
+Plot
+
+```{r}
+coxPred %>% 
+  ggplot(aes(x = Mean_C_4, y = Pred_linearPredictor, color = Algae_treatment)) +
+  geom_line(aes(linetype = Wounding_treatment)) +
+  facet_wrap(~Crab_treatment) +
+  theme_classic() +
+  ylab("Predicted linear predictor") +
+  xlab("Mean temperature over the past 4 days (deg C)")
+```
+
+Also risk
+
+```{r}
+preds <- predict(timemod, newdata = coxPred,
+        type = "risk") # this gives exp(linear predictor)
+
+# join together
+coxPred$Pred_risk <- preds
+```
+
+
+```{r}
+coxPred %>% 
+  ggplot(aes(x = Mean_C_4, y = Pred_risk, color = Algae_treatment)) +
+  geom_line(aes(linetype = Wounding_treatment)) +
+  facet_wrap(~Crab_treatment,
+             labeller = label_both) +
+  theme_classic() +
+  ylab("Predicted risk") +
+  xlab("Mean temperature over the past 4 days (deg C)")
+```
+
+
+# Original tissue loss model
+
+Create our color palette from the Wes Anderson package
+
+```{r}
+vibRed <- wes_palette("Darjeeling1", n = 5)[1]
+forGreen <- wes_palette("Darjeeling1", n = 5)[2]
+lightO <- wes_palette("Darjeeling1", n = 5)[3]
+darkO <- wes_palette("Darjeeling1", n = 5)[4]
+skyB <- wes_palette("Darjeeling1", n = 5)[5]
+
+
+# and specify text size
+txt_sz <- 15 
+
+```
+
+
+## Make a tissue loss model that includes temperature
+
+Before doing any analyses, we want to remove observations from February 4th because that represents tissue loss since the first (multiple days), which is not comparable to the rest. We also want to attach temperature observations to our tissue loss data and remove one influential observation (row 539) found using Cook's distance
+
+```{r}
+# remove the 4th
+tissueLoss %>% 
+  filter(Date != as.Date("2020-02-04")) %>% 
+  # update this for the first day of the experiment (still no tissue loss on the 1st)
+  mutate(Date = case_when(
+    Date == as.Date("2020-01-31") ~ as.Date("2020-02-01"),
+    TRUE ~ Date)) %>% 
+  left_join(tempMetrics, key = Date) -> tissueLoss4
+
+# we also want to remove the "influential observation" (row 539 diagnosed using code below)
+tissueLoss4.f <- tissueLoss4[-539,]
+```
+
+
+## Use a generalized linear model with a binomial family
+
+Because of the large number of zeros in the dataset, we'll use a binomial response variable (0 for no tissue loss, 1 for tissue loss)
+
+```{r}
+# make a column for y/n tissue loss
+tissueLoss4.f$TissueBin <- ifelse(tissueLoss4.f$Perc_tissue_loss > 0.0, 1, 0)
+  
+```
+
+Make the full mixed model
+
+```{r}
+# make a mixed model for the zeros
+m1 <- glmer(TissueBin ~ Crab_treatment*Algae_treatment*Wounding_treatment*scale(Mean_C_4) + (1|Coral_ID), 
+          data = tissueLoss4.f, 
+          family = "binomial",
+          control=glmerControl(optimizer = "bobyqa", 
+                               optCtrl = list(maxfun=2e5))) # this last line just helps it fit 
+
+summary(m1)
+```
+
+
+### Plot predictions
+
+```{r}
+# make labels nice
+crab.labs <- c("Crab", "No crab")
+names(crab.labs) <- c("Y", "N")
+
+
+
+# make a dataframe to store predictions in
+pred <- expand.grid(Mean_C_4 = seq(min(tissueLoss4.f$Mean_C_4), max(tissueLoss4.f$Mean_C_4), by = 0.05), 
+                    Crab_treatment = c("Y", "N"), 
+                    Algae_treatment = c("Y", "N"), 
+                    Wounding_treatment = c("Y", "N"),
+                    Coral_ID = 1:80)
+
+# generate predictions
+pred$PredProb <- predict(m1, pred, type = "response")
+
+# get the average across corals
+pred %>% 
+  group_by(Crab_treatment, Algae_treatment, Wounding_treatment, Mean_C_4) %>% 
+  summarize(Mean_prob = mean(PredProb), SE = sd(PredProb)/sqrt(n())) -> pred_avg
+
+
+# plot
+pred_avg %>% 
+  # use predicted data
+  ggplot(aes(x = Mean_C_4, y = Mean_prob, color = Algae_treatment, linetype = Wounding_treatment)) +
+  geom_line() +
+  scale_linetype_manual(values=c("dashed", "solid"),
+                        name = "Wounding") +
+  # add in actual data
+  geom_point(data = tissueLoss4.f, 
+             aes(x = Mean_C_4, y = TissueBin, color = Algae_treatment), 
+             alpha = 0.2) +
+  facet_grid(.~Crab_treatment, labeller = labeller(Crab_treatment = crab.labs)) + # facet by crabs
+  ylab("Predicted probability of losing tissue") +
+  xlab("Average 4-day water temperature (°C)") +
+  scale_color_manual(values = c(forGreen, darkO),
+                     name = "Algae") +
+  theme_classic() +
+  # change text size
+  theme(text = element_text(size = txt_sz)) 
+
+```
