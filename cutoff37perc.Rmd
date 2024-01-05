@@ -1,0 +1,751 @@
+---
+title: "Try a cutoff of 37%: survival"
+output: html_document
+date: "2024-01-04"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse) # data wrangling
+require(here) # relative file paths
+```
+
+This code is to think about a reviewer comment
+
+First, we bring in the data:
+
+```{r}
+# this is the percent tissue loss on a nubbin on a given day (cumulative, taken from photos)
+nubbinDat <- read_csv(here("data/Nubbin_percent_cover.csv"))
+  nubbinDat$Date <- as.Date(nubbinDat$Date, format='%m/%d/%y') # get dates in datetime format
+  
+  
+# this is the metadata for the experiment
+metadat <- read.csv(here("data/Coral_metadata.csv")) 
+
+# this is the original death data
+deathDatOG <- read_csv(here("data/Coral_survival.csv")) %>% 
+  rename(Death_dayOG = Death_day) %>% 
+  rename(CensoredOG = Censored)
+  
+```
+
+Then get daily tissue loss
+
+```{r}
+# summarize for each date (average both coral sides)
+nubbinDat %>% 
+  group_by(Coral_ID, Date) %>% # average for both sides (front & back)
+  summarize(Percent_white_both_sides = mean(Percent_dead)) %>% 
+  full_join(metadat) %>% # add in metadata
+  drop_na(Coral_ID) -> treatPercChange
+
+```
+
+
+# Use 37.5% threshold
+
+```{r}
+treatPercChange %>% 
+  # look for the first day a coral hit this % tissue loss
+  filter(Percent_white_both_sides >=37.50) %>% 
+  group_by(Coral_ID) %>% 
+  summarize(Death_day = min(Date)) %>% 
+  # join to get full list of coral ID's and also to compare changes
+  full_join(deathDatOG) %>% 
+  mutate(Death_day = as.character(Death_day)) %>% 
+  # censor the 2 that broke correctly
+  mutate(Death_day = case_when(Coral_ID == 7 ~ "2020-02-14", 
+                               Coral_ID == 29 ~ "2020-02-16",
+                               TRUE ~ Death_day)) %>%
+
+  rowwise() %>% 
+  
+  
+  
+  mutate(Delta_time = str_split(Death_day, "-")[[1]][3]) %>% 
+  mutate(Delta_time = as.numeric(Delta_time)) %>% 
+  
+  mutate(Censored = case_when(Coral_ID == 7 ~ 0, 
+                              Coral_ID == 29 ~ 0,
+                              is.na(Death_day) ~ 0,
+                              TRUE ~ 1)) %>% 
+
+  
+  
+  mutate(Delta_time = case_when(is.na(Death_day) ~ 25,
+                               TRUE ~ Delta_time)) %>% 
+  mutate(Death_day = case_when(is.na(Death_day) ~ "2020-02-25",
+                               TRUE ~ Death_day) ) -> surv_df
+```
+
+# Survival code
+Create our color palette from the Wes Anderson package
+
+```{r}
+vibRed <- wes_palette("Darjeeling1", n = 5)[1]
+forGreen <- wes_palette("Darjeeling1", n = 5)[2]
+lightO <- wes_palette("Darjeeling1", n = 5)[3]
+darkO <- wes_palette("Darjeeling1", n = 5)[4]
+skyB <- wes_palette("Darjeeling1", n = 5)[5]
+
+```
+
+# Plot the survival among treatments
+
+```{r}
+# order the treatments
+surv_df$Treatment <- factor(surv_df$Treatment,levels = c("NAN", "NAW",  
+                                                         "NNW", "NNN", "CAN",
+                                                         "CAW", "CNN", "CNW"))
+
+# broken up by no wounding:
+surv_df %>% 
+  filter(Coral_ID != 7, Coral_ID != 29) %>% # get rid of the ones that were dropped 
+  filter(Treatment == "NAN" | Treatment == "NNN" | Treatment == "CAN" | Treatment == "CNN") %>% 
+  ggplot(aes(x = Treatment, y = Delta_time, fill = Algae_treatment)) +
+  geom_boxplot(size = 1) +
+  scale_fill_manual(values = alpha(c(darkO, forGreen), 0.7)) +
+  ylab("Number of days to death") +
+  ggtitle("(a) No wounding") +
+  scale_y_continuous(breaks = c(0, 5, 10, 15, 20, 25)) +
+  theme_classic() +
+  theme(text = element_text(size = 20), legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank()) -> boxp.nowound
+
+
+# and wounding:
+surv_df %>% 
+  filter(Coral_ID != 7, Coral_ID != 29) %>% # get rid of the dropped ones
+  filter(Treatment == "NAW" | Treatment == "NNW" | Treatment == "CAW" | Treatment == "CNW") %>% 
+  ggplot(aes(x = Treatment, y = Delta_time, fill = Algae_treatment)) +
+  geom_boxplot(size = 1) +
+  scale_fill_manual(values = alpha(c(darkO, forGreen), 0.7)) +
+  ylab("Number of days to death") +
+  scale_y_continuous(breaks = c(0, 5, 10, 15, 20, 25)) +
+  ggtitle("(b) Wounding") +
+  scale_x_discrete(labels=c("Algae","Control","Crab + Algae","Crab")) +
+  theme_classic() +
+  theme(text = element_text(size = 20), legend.position = "none") -> boxp.wound
+
+```
+
+Plot them together
+
+```{r}
+# pdf(here("figures/surivalBoxplts.pdf"), height = 9, width = 7.5)
+
+boxp.nowound / boxp.wound
+
+# dev.off()
+```
+
+# Survival analysis
+
+First create a survival object using the Kaplan-Meier method. The Kaplan-Meier estimator is a non-parametric (survival data are skewed) statistic that allows us to estimate the survival function. At t = 0 the Kaplan-Meier estimate is 1 and with t -> inf the estimator approaches 0 (no survival). It assumes that the probability of surviving past a certain time point t is equal to the product of the observed survival rates until time point t and that proportions are conditional on the previous proportions (only take into account those that survived previous t). For this we want to order survival times in order of increasing duration first, then calculate S(t) (the survival probability at time t) by multiplying surviving proportions in each step. The `survival` package does this for us. Ref: https://www.datacamp.com/community/tutorials/survival-analysis-R and http://www.sthda.com/english/wiki/cox-proportional-hazards-model
+
+```{r}
+surv_object <- Surv(time = surv_df$Delta_time, # time to death
+                    event = surv_df$Censored) # Censored points: 0 = right censored (not a true death), 1 = event at time
+  
+```
+
+Create a full cox proportional hazards regression model. Note that a hazard ratio (HR) > 1 is an increased risk of death and HR < 1 is a decreased risk.
+
+```{r}
+full.coxph <- coxph(surv_object ~ Crab_treatment * Algae_treatment * Wounding_treatment, 
+                    data = surv_df) # note response here must be a survival object returned by the Surv funtion (why we make the surv_object above)
+
+```
+
+## Model selection
+
+Now we want to winnow down the terms
+
+```{r}
+coxph.1 <- coxph(surv_object ~ Crab_treatment + Algae_treatment + Wounding_treatment +
+                   Crab_treatment:Algae_treatment +
+                   Crab_treatment:Wounding_treatment +
+                   Algae_treatment:Wounding_treatment,
+                 data = surv_df)
+
+anova(full.coxph, coxph.1, test = 'Chisq') # no difference
+```
+
+```{r}
+# drop the least significant highest order term
+coxph.2 <- coxph(surv_object ~ Crab_treatment + Algae_treatment + Wounding_treatment +
+                   Crab_treatment:Wounding_treatment +
+                   Algae_treatment:Wounding_treatment,
+                 data = surv_df)
+
+anova(coxph.1, coxph.2, test = 'Chisq') # looks okay--continue reducing
+```
+
+```{r}
+# drop the least significant highest order term
+coxph.3 <- coxph(surv_object ~ Crab_treatment + Algae_treatment + Wounding_treatment +
+                   Crab_treatment:Wounding_treatment,
+                 data = surv_df)
+
+anova(coxph.2, coxph.3, test = 'Chisq') # looks okay--continue reducing
+```
+
+```{r}
+# drop the highest order term
+coxph.4 <- coxph(surv_object ~ Crab_treatment + Algae_treatment + Wounding_treatment,
+                 data = surv_df)
+
+anova(coxph.3, coxph.4, test = 'Chisq') # looks like we took it one step too far
+```
+
+```{r}
+# check to make sure this simpler model isn't better
+coxph.5 <- coxph(surv_object ~ Crab_treatment + Algae_treatment,
+                 data = surv_df)
+
+
+AIC(full.coxph, coxph.1, coxph.2, coxph.3, coxph.4, coxph.5) # Nope, looks like the best model is Model 3
+
+
+# set it as our model
+mCox <- coxph.3
+  summary(mCox) # see the model overall is also significant (Wald test, LRT, longrank)
+
+```
+
+## Plot hazards model
+
+Plot survival curves as a function of the different treatments
+
+```{r}
+# first for crabs AND algae + crab:
+crab_df <- with(surv_df,
+               data.frame(Crab_treatment = c("Y", "Y", "N"), 
+                          Algae_treatment = c("N", "Y", "N"),
+                          Wounding_treatment = c("N", "N", "N")))
+  
+c.fit <- survfit(mCox, newdata = crab_df, data = surv_df)
+
+# for algae AND algae + crab:
+alg_df <- with(surv_df,
+                data.frame(Crab_treatment = c("N", "Y", "N"), 
+                           Algae_treatment = c("Y", "Y", "N"),
+                           Wounding_treatment = c("N", "N", "N")))
+
+a.fit <- survfit(mCox, newdata = alg_df, data = surv_df)
+
+# for JUST wounding:
+w_df <- with(surv_df,
+               data.frame(Crab_treatment = c("N", "N"), 
+                          Algae_treatment = c("N", "N"),
+                          Wounding_treatment = c("Y", "N")))
+
+w.fit <- survfit(mCox, newdata = w_df, data = surv_df)
+
+# for wounding AND crab interaction
+CW_df <- with(surv_df,
+                data.frame(Crab_treatment = c("Y", "Y", "N", "N"), 
+                           Algae_treatment = c("N", "N", "N", "N"),
+                           Wounding_treatment = c("Y", "N", "Y", "N")))
+
+cw.fit <- survfit(mCox, newdata = CW_df, data = surv_df)
+
+
+
+# plot them all
+ggsurvplot(c.fit, conf.int = TRUE, legend.labs=c("Crab", "Crab + Algae", "Control"),
+           ggtheme = theme_classic())
+ggsurvplot(cw.fit, conf.int = TRUE, legend.labs=c("Crab + Wounding", "Crab", "Wounding", "Control"),
+           ggtheme = theme_classic())
+
+# make a font size
+fnt_sz <- 15
+# and a legend side size
+leg_pos <- "top"
+
+arrange_ggsurvplots(list(
+  ggsurvplot(c.fit, conf.int = TRUE, legend.labs=c("Crab", "Crab + Algae", "Control"),
+             ggtheme = theme_classic(base_size = fnt_sz),
+             legend = leg_pos,
+             palette = c(skyB, lightO, "darkgray"), 
+             legend.title = "(a)", conf.int.alpha = 0.1, 
+             xlab="Time (days)"),
+  ggsurvplot(a.fit, legend.labs=c("Algae", "Crab + Algae", "Control"),
+             ggtheme = theme_classic(base_size = fnt_sz), 
+             legend = leg_pos,
+             palette = c(forGreen , lightO, "darkgray"), 
+             legend.title = "(c)", conf.int = TRUE, 
+             conf.int.alpha=0.1, 
+             xlab="Time (days)"),
+  ggsurvplot(w.fit, data = surv_df, legend.labs=c("Wounding", "Control"),
+             ggtheme = theme_classic(base_size = fnt_sz), 
+             legend = leg_pos,
+             palette = c(darkO, "darkgray"), 
+             legend.title = "(b)", 
+             conf.int = TRUE, 
+             conf.int.alpha=0.1, 
+             xlab="Time (days)"),
+  ggsurvplot(cw.fit, legend.labs=c("C+W", "C", "W", "Control"),
+             ggtheme = theme_classic(base_size = fnt_sz), 
+             legend = leg_pos,
+             palette = c(vibRed, skyB, darkO, "darkgray"), 
+             legend.title = "(d)", 
+             conf.int = TRUE, 
+             conf.int.alpha=0.1, 
+             xlab="Time (days)")),
+  ncol = 2, nrow = 2) -> plts_coxph
+
+ ggsave(here("figures/survivalCurves.pdf"), plts_coxph, width = 10, height = 8)
+
+```
+
+
+
+
+## Test model assumptions
+
+We want to test that the hazards are proportional (don't change over time), which is assumed in the coxph model. We'll use scaled Schoenfled residuals, which are independent of time and should have a random pattern. The random assumption is supported by p > 0.05
+
+```{r}
+test.ph <- cox.zph(mCox) # meets this assumption
+  ggcoxzph(test.ph) # no pattern with time
+```
+
+Then we'll test whether there's a strong outlier pull/influential observations
+
+```{r}
+ggcoxdiagnostics(mCox, type = "dfbeta", # dfbeta "plots the estimated changes in the regression coefficients upon deleting each observation in turn"
+                 ggtheme = theme_bw()) 
+
+
+```
+
+- These look fairly symmetric so are going to leave everything as-is
+
+
+
+
+
+
+# Time dependent covariate with timedep
+
+Using the `timedep` tutorial as guidance:
+
+```{r}
+newcgd <- tmerge(data1 = cgd0[,1:13], 
+                 data2 = cgd0, 
+                 id = id, 
+                 tstop = futime)
+
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime1))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime2))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime3))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime4))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime5))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime6))
+newcgd <- tmerge(newcgd, cgd0, id = id, infect = event(etime7))
+```
+
+
+
+## Bring in temperature data
+
+Need temperature data as well
+
+```{r}
+temp <- read_csv(here("generated_data/temperature_metrics.csv"))
+
+# also want a list of all days the corals were observed, which we can get from the tissue loss data
+tissueL <- read_csv(here("generated_data/tissue_loss.csv")) 
+```
+
+
+Join with survival data
+
+```{r}
+tdata <- surv_df %>% 
+  mutate(Date = as.Date(Death_day, format = c("%m/%d/%y"))) %>% 
+  left_join(temp) %>% 
+  select(Coral_ID, Delta_time, Mean_C_4) 
+```
+
+I think need a df with every day the corals were observed as well as their status?
+
+```{r}
+# get temperatures on given days
+tissueL %>% 
+  select(Date) %>% 
+  unique() %>% 
+  mutate(Day = ifelse(day(Date) == 31, 0, day(Date))) %>%  
+  # the start of the experiment is on the 31st, which is time 0, then first of the next month is 1, etc. (just worked out conveniently)
+  left_join(temp) -> temptime
+
+```
+
+Use tissue loss dataframe where we already have a row for each day a coral was photographed
+
+```{r}
+tissueL %>% 
+  select(Coral_ID, Date) %>% 
+  full_join(temptime) -> fullLoss
+  
+# join with death days to make a status category
+surv_df %>% 
+  select(Coral_ID, Delta_time, Censored) %>% 
+  # get a column that will match with fullLoss 
+  mutate(Day = Delta_time) %>% 
+  full_join(fullLoss, by = c("Coral_ID", "Day")) %>% 
+  # now NA's are 0 (coral is alive) and 1's are deaths, unless they're censored
+  mutate(Status = case_when(
+    !is.na(Delta_time) & Censored == 1 ~ 1,
+    TRUE ~ 0
+  )) -> timeData
+```
+
+Then make a tstart and tstop
+
+```{r}
+timeData %>% 
+  mutate(tstart = case_when(Day == 0 ~ 0, 
+                            # since we only checked all on the first day, this window spans day 1-4 (could have happened any time in there)
+                            Day == 4 ~ 1, 
+                            # all other cases, start day is the day before
+                            TRUE ~ Day-1)) %>% 
+  mutate(tstop = case_when(Day == 0 ~ 1,
+                           TRUE ~ Day)) %>% 
+  select( -Delta_time) -> timeData2
+
+surv_df %>% 
+  select(-Censored) %>% 
+  # join with original data
+  full_join(timeData2) -> timeDepdf
+```
+
+
+Run time-dependent version
+
+
+```{r}
+
+mTime <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment * Algae_treatment * Wounding_treatment * Mean_C_4, 
+      cluster = Coral_ID,
+      data = timeDepdf)
+
+
+# why is there an NA for Mean_C_4?
+```
+
+Now we want to winnow down the terms
+
+```{r}
+coxph.1T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Algae_treatment:Mean_C_4 +
+                    Crab_treatment:Wounding_treatment:Mean_C_4 +
+                    Algae_treatment:Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+summary(coxph.1T)
+```
+
+
+```{r}
+coxph.2T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Algae_treatment:Mean_C_4 +
+                    Crab_treatment:Wounding_treatment:Mean_C_4 +
+                    Algae_treatment:Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.2T)
+
+anova(coxph.1T, coxph.2T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.3T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Algae_treatment:Mean_C_4 +
+                    Crab_treatment:Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.3T)
+
+anova(coxph.2T, coxph.3T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.4T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Mean_C_4 +
+                    Crab_treatment:Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.4T)
+
+anova(coxph.3T, coxph.4T, test = 'Chisq') # no difference
+
+```
+
+
+
+Drop another term
+
+```{r}
+coxph.5T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4 +
+                    Crab_treatment:Algae_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.5T)
+
+anova(coxph.4T, coxph.5T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.6T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Algae_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.6T)
+
+anova(coxph.5T, coxph.6T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.7T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Algae_treatment +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.7T)
+
+anova(coxph.6T, coxph.7T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.8T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Wounding_treatment +
+                    Algae_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.8T)
+
+anova(coxph.7T, coxph.8T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.9T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Wounding_treatment +
+                    Crab_treatment:Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.9T)
+
+anova(coxph.8T, coxph.9T, test = 'Chisq') # no difference
+
+```
+
+Drop another term
+
+```{r}
+coxph.10T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Crab_treatment:Wounding_treatment +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.10T)
+
+anova(coxph.9T, coxph.10T, test = 'Chisq') # no difference
+
+```
+
+
+
+Drop another term
+
+```{r}
+coxph.11T <- coxph(Surv(tstart, tstop, Status) ~ Crab_treatment + 
+                    Algae_treatment + 
+                    Wounding_treatment + 
+                    Mean_C_4 +
+                    Wounding_treatment:Mean_C_4, 
+                  data = timeDepdf)
+
+
+summary(coxph.11T)
+
+anova(coxph.10T, coxph.11T, test = 'Chisq') # p = 0.05--stop at model 10
+
+```
+
+
+```{r}
+timeMod <- coxph.10T
+```
+
+## Interpret
+
+```{r}
+coxPred <- expand_grid(Crab_treatment = c("Y", "N"),
+                       Algae_treatment = c("Y", "N"),
+                       Wounding_treatment = c("Y", "N"),
+                       Mean_C_4 = seq(from = min(timeDepdf$Mean_C_4),
+                                      to = max(timeDepdf$Mean_C_4),
+                                      length.out = 20))
+preds <- predict(timeMod, newdata = coxPred,
+        type = "lp") 
+
+# join together
+coxPred$Pred_linearPredictor <- preds
+```
+
+Plot
+
+```{r}
+coxPred %>% 
+  ggplot(aes(x = Mean_C_4, y = Pred_linearPredictor, color = Algae_treatment)) +
+  geom_line(aes(linetype = Wounding_treatment)) +
+  facet_wrap(~Crab_treatment) +
+  theme_classic() +
+  ylab("Predicted linear predictor") +
+  xlab("Mean temperature over the past 4 days (deg C)")
+```
+
+Also risk
+
+```{r}
+preds <- predict(timeMod, newdata = coxPred,
+        type = "risk") # this gives exp(linear predictor)
+
+# join together
+coxPred$Pred_risk <- preds
+```
+
+
+```{r}
+coxPred %>% 
+  ggplot(aes(x = Mean_C_4, y = Pred_risk, color = Algae_treatment)) +
+  geom_line(aes(linetype = Wounding_treatment)) +
+  facet_wrap(~Crab_treatment,
+             labeller = label_both) +
+  theme_classic() +
+  ylab("Predicted risk") +
+  xlab("Mean temperature over the past 4 days (deg C)")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
