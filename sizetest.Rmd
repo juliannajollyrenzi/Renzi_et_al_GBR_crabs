@@ -1,0 +1,44 @@
+---
+title: "Size test"
+output: html_document
+date: "2024-01-05"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(tidyverse)
+require(here)
+```
+
+This script is making sure there are no size differences among fragments that are potentially affecting results
+
+# Bring in weight data
+
+```{r}
+weights <- read_csv(here("data/Coral_buoyant_weights.csv"))
+
+metadat <- read.csv(here("data/Coral_metadata.csv")) 
+```
+
+
+# Look at differences between treatments
+
+```{r}
+weights %>% 
+  full_join(metadat) -> weightCor
+
+
+weightCor %>% 
+  ggplot(aes(x = Treatment, y = Initial_dry_weight)) +
+  geom_boxplot()
+```
+
+```{r}
+m1 <- aov(Initial_dry_weight ~ Treatment, data = weightCor)
+  summary(m1) # means appear to be the same
+```
+
+
